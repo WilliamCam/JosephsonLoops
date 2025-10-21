@@ -38,22 +38,15 @@ ps = [
 
 tspan = (0.0, 1e-6)
 saveat = LinRange(tspan[2]/10.0, tspan[2], 10000)
-
-sol = jls.tsolve(model, u0, tspan, ps; saveat = saveat) 
+sol = jls.tsolve(model, u0, tspan, ps; saveat = saveat)
 jls.tplot(sol, jls.R1, units="volts")
 
-
+## Parameter Sweeps
 Φspan = (0.0, 2.0*Φ₀)
-
-ensemble_sol = jls.ensemble_parameter_sweep(
-    model, u0, tspan, Φspan, ps, jls.loop1.sys.Φₑ, jls.R1, saveat = saveat
-)
-using Plots
-plot!(ensemble_sol.u)
+ensemble_sol = jls.ensemble_parameter_sweep(model, u0, tspan, Φspan, ps, jls.loop1.sys.Φₑ, jls.R1, saveat = saveat)
+plot(ensemble_sol.u)
 
 
 Ispan = (0.0, 2*I₀)
-ensemble_sol = jls.ensemble_parameter_sweep(
-    model, u0, tspan, Ispan, ps, jls.loop4.sys.I, jls.R1, saveat = saveat
-)
+ensemble_sol = jls.ensemble_parameter_sweep(model, u0, tspan, Ispan, ps, jls.loop4.sys.I, jls.R1, saveat = saveat)
 plot(ensemble_sol.u)

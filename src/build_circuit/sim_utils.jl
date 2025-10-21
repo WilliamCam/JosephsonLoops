@@ -1,15 +1,3 @@
-function parameter_set(ps, param::Num, value::Float64)
-    return push!(ps, param => value)
-end
-
-#Solve initial conditions
-function solve_ini(model, old_u0, t_end, ps; alg = Rodas5(), kwargs...)
-    tspan_ini = (0.0, t_end)                                #Create a timespan
-    prob = ODEProblem(model, old_u0, tspan_ini, ps, save_everystep = false; kwargs...)  #Create an ODEProblem to solve for a specified time only saving the final component variable values
-    sol = solve(prob, alg)                                       #Solve the ODEProblem
-    new_u0 = sol[:,end]                                     #Set the new initial conditions to the 
-    return new_u0                                           #return the new intial conditions
-end
 
 #transient simulation of whole system
 function tsolve(model, u0, tspan, param_pairs; alg = Rodas5(), kwargs...)      
