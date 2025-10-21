@@ -1,36 +1,31 @@
 #In this example we model an parallel RLC circuit driven by a voltage source
 
 #Load scsim package
-include("C://Users//21958742//GitHub//SC-circuit-simulator//program//SCsim.jl")
 
-using DifferentialEquations
+using JLoop
 
 #open the circuit netlist file named RLC.jld2, to create a new circuit netlist we can use scsim.new_netlist()
-scsim.open_file("C://Users//21958742//GitHub//SC-circuit-simulator//examples//RLC.jld2")
+JLoop.open_file("src//examples//RLC.jld2")
 
 #cirucit model ODE system and initial condition vector are created.
-model, u0 = scsim.build_circuit()
+model, u0 = JLoop.build_circuit()
 
 # we set the values of circuit parameters, for any parameters not specified; default values will be assigned.
 ps = [
-    scsim.loop1.sys.ω => 1.0
-    scsim.loop1.sys.I => 1.0
-    scsim.C1.sys.C => 1.0e-1
-    scsim.L1.sys.L => 1.0e-1
-    scsim.R1.sys.R => 10.0
+    JLoop.loop1.sys.ω => 1.0
+    JLoop.loop1.sys.I => 1.0
+    JLoop.C1.sys.C => 1.0e-1
+    JLoop.L1.sys.L => 1.0e-1
+    JLoop.R1.sys.R => 10.0
 ]
-
-#find resaonable initial conditions by settling transients
-u_initial = scsim.solve_ini(model, u0, 1.0e-4, ps, alg = Rodas5())
-
-using DifferentialEquations, ModelingToolkit
+using DifferentialEquations
 
 #specify transient window for solver
 tspan = (0.0, 100.0)
 
 #transient circuit analysis
-sol = scsim.tsolve(model, u_initial, tspan, ps, alg = Rodas5())
-scsim.tplot(sol, scsim.R1, units = "amps")
+sol = JLoop.tsolve(model, u0, tspan, ps, alg = Rodas5())
+JLoop.tplot(sol, JLoop.R1, units = "amps")
 
 # we can pass any arguments known to the problem interface of DifferentialEquations.jl, to achieve better results
 

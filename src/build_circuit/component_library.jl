@@ -1,7 +1,8 @@
-using ModelingToolkit, Plots, DifferentialEquations, LinearAlgebra
+using ModelingToolkit, Symbolics
+
 const Φ₀ = 2.067833848e-15              #Flux quantum
 
-@variables t                            #Time variable
+@independent_variables t                            #Time variable
 D = Differential(t)                     #First Differential operation
 D2 = Differential(t)^2                  #Second Differential operation
 
@@ -44,7 +45,7 @@ function build_capacitor(;name, C = 1.0) #Builds ODESystem for capacitor using C
             D2(θ)~i*2*pi/(Φ₀*C)             #Differential equation defining θ and C relationship
           ]
     sys = extend(ODESystem(eqs, t, [], ps; name=name), component)
-    Component(ode_order_lowering(sys))
+    Component(sys)
 end
 
 function build_JJ(;name, I0 = 1.0, R = 1.0, C = 1.0, L = 1.0) #Builds ODESystem for Josephson Junction using Component structure
@@ -55,7 +56,7 @@ function build_JJ(;name, I0 = 1.0, R = 1.0, C = 1.0, L = 1.0) #Builds ODESystem 
             D2(θ) ~ (i - I0*sin(θ) - D(θ)*Φ₀/(2*pi*R))*(2*pi)/(Φ₀*C)    #Differential equation defining θ I0, R and C relationship
           ]
     sys = extend(ODESystem(eqs, t, [], ps; name=name), component)
-    Component(ode_order_lowering(sys))
+    Component(sys)
 end
 
 function build_voltage_source(;name, V = 1.0, ω = 0.0) #Builds ODESystem for Voltage Source (AC or DC) using Component structure

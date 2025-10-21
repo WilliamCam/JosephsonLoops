@@ -1,5 +1,4 @@
 using JLD2, FileIO, Symbolics
-
 #print readme file in REPL
 function readme()
     print("readme.txt")
@@ -331,4 +330,23 @@ function edit_netlist(name)
     close(file)
 
     process_netlist(name)   #Reprocess data in case any changes have been made to circuit structure
+end
+
+#User input to enter edit or create functions
+while true  
+    println(" --- Enter 'E' to edit an existing netlist  --- ")
+    println(" --- Enter 'N' to create new netlist  --- ")
+    println(" --- Enter '~' to exit program  --- ")
+    input = readline()
+    if (uppercase(input) == "E")
+        println(" --- Enter filename (excluding '.jld2')  --- ")
+        input = readline()
+        edit_netlist("$input")
+    elseif (uppercase(input) == "N")
+        println(" --- Enter filename (excluding '.jld2')  --- ")
+        input = readline()
+        new_netlist("$input")
+    elseif (input == "~")
+        exit()
+    end
 end

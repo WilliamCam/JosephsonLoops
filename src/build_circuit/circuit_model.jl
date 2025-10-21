@@ -1,6 +1,3 @@
-using JLD2, FileIO, ModelingToolkit, Plots, DifferentialEquations, LinearAlgebra, Statistics, Dates, Symbolics, DataStructures
-include("component_library.jl")
-include("create_netlist.jl")
 
 #Display function uses
 function help()
@@ -163,22 +160,23 @@ function build_circuit(; dae_system = false)
     end
                                  
     old_sys = []                                            #Array to store system states                                          
-    u0 = Pair{Num, Float64}[]                               #Array to store system initial condionts  (Set to 0)
+    u0 = Pair{Num, Any}[]                               #Array to store system initial condionts  (Set to 0)
 
     θcomponents = OrderedDict()                                        #Array to store components with phase differnece θ
-    for comp in built_components                            #Iterate through components to find component system states and intial conditons
+    for comp in built_components                            #Iterate through components to find component  system states and intial conditons
         push!(old_sys, comp[2].sys)
         if  !(comp[1][1] in ['L', 'M'])
-            push!(u0, comp[2].sys.θ=>0.0)                   #θ initialised to 0
+            push!(u0, comp[2].sys.θ=>nothing)                   #θ initialised to 0
             push!(u0, comp[2].sys.i=>0.0)                   #i initialised to 0
             θcomponents[comp[1]] = comp[2]
-            if (uppercase(comp[1][1]) in ['C', 'J', 'V'])   
+            if (uppercase(comp[1][1]) in ['C', 'J', 'V', 'R'])   
                 push!(u0, D(comp[2].sys.θ)=>0.0)            #D(θ) initialised to 0 for capacitors, JJs and voltage sources
             end
         end
     end
     for loop in built_loops                                 #Iterate through components to find loop system states
         push!(old_sys, loop.sys)
+        push!(u0, loop.sys.iₘ=>nothing)                 #iₘ initialised to 0
     end
     sys = Vector{ODESystem}(old_sys)                        #Convert system states array to an ODESystem vector form
 
@@ -193,19 +191,12 @@ function build_circuit(; dae_system = false)
     @named _model  =  ODESystem(eqs, t)                     #Create an ODESystem with the existing equations
 
     @named model = compose(_model, sys)                     #Compose the existing ODESystem with the system states vector
-    println()
-    display(equations(model))                               #Display model equations
-    println()
-    display(states(model))                                  #Display model states
-    println()
-    display(parameters(model))
-    println()
     if dae_system == true
-        new_model = structural_simplify(dae_index_lowering(model))
+        new_model = mtkcompile(dae_index_lowering(model))
     else
-        new_model = structural_simplify(model)                #structural_simplify Algorithm to improve performance
+        new_model = mtkcompile(model)                #structural_simplify Algorithm to improve performance
     end
-        
+
     return new_model, u0
                                  #Return structuraly simplified model and initial conditions
 end

@@ -11,8 +11,6 @@ function solve_ini(model, old_u0, t_end, ps; alg = Rodas5(), kwargs...)
     return new_u0                                           #return the new intial conditions
 end
 
-
-
 #transient simulation of whole system
 function tsolve(model, u0, tspan, param_pairs; alg = Rodas5(), kwargs...)      
     prob = ODEProblem(model, u0, tspan, param_pairs; kwargs...)   #Create an ODEProblem to solve for a specified time
@@ -119,7 +117,7 @@ function ensemble_parameter_sweep(
 
     p_index = findfirst(isequal(parameter), parameters(model))
     function prob_func(prob, i ,repeat)
-        prob.p[p_index] = p_vec[i]
+        prob.p[1][p_index] = p_vec[i]
         prob
     end
 
