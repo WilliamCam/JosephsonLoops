@@ -6,9 +6,9 @@ Important: In Julia REPL when the user is asked for an input the initial input i
 ***	                                           How to use                                                ***
 ******************************************************************************************************************
 
-1. Run "run_netlist.jl" (Best to run from terminal as Julia REPL is sometimes clunky with readline()) to create 
+1. Run "netlist_tool.jl" (Best to run from terminal as Julia REPL is sometimes clunky with readline()) to create 
    a new circuit 
-2. If you made any mistakes use the edit function (Accessible thorugh "run_netlist.jl")
+2. If you made any mistakes use the edit function (Accessible thorugh "netlist_tool.jl")
 3. Run commands from "sim_model.jl" to simulate
 
 ******************************************************************************************************************
