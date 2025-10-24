@@ -41,6 +41,17 @@ saveat = LinRange(tspan[2]/10.0, tspan[2], 10000)
 sol = jls.tsolve(model, u0, tspan, ps; saveat = saveat)
 jls.tplot(sol, jls.R1, units="volts")
 
+##Benchmarking
+using ModelingToolkit
+using BenchmarkTools
+using DifferentialEquations
+using Profile
+
+prob = ODEProblem(model, u0, tspan, ps, saveat = saveat)
+@benchmark sol = solve(prob, Rodas5())
+
+
+
 ## Parameter Sweeps
 Φspan = (0.0, 2.0*Φ₀)
 ensemble_sol = jls.ensemble_parameter_sweep(model, u0, tspan, Φspan, ps, jls.loop1.sys.Φₑ, jls.R1, saveat = saveat)

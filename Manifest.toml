@@ -2,7 +2,7 @@
 
 julia_version = "1.12.1"
 manifest_format = "2.0"
-project_hash = "168852ff592a18daea78b6128b96f5c579a6cd0c"
+project_hash = "a19fe7801ee893cf163e8f520a47370ac5081a31"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "27cecae79e5cc9935255f90c53bb831cc3c870d7"
@@ -1061,7 +1061,7 @@ uuid = "692b3bcd-3c85-4b1f-b108-f13ce0eb3210"
 version = "1.7.1"
 
 [[deps.JLoop]]
-deps = ["DataStructures", "Dates", "DifferentialEquations", "FileIO", "JLD2", "LinearAlgebra", "ModelingToolkit", "Plots", "Statistics"]
+deps = ["DataStructures", "Dates", "DifferentialEquations", "FileIO", "JLD2", "LinearAlgebra", "ModelingToolkit", "Plots", "Statistics", "Symbolics"]
 path = "."
 uuid = "fb07e101-5a60-4408-9312-698af44306dd"
 version = "0.1.0"
@@ -2012,6 +2012,11 @@ version = "0.5.7"
 [[deps.Printf]]
 deps = ["Unicode"]
 uuid = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+version = "1.11.0"
+
+[[deps.Profile]]
+deps = ["StyledStrings"]
+uuid = "9abbd945-dff8-562f-b5e8-e1ebf5ef1b79"
 version = "1.11.0"
 
 [[deps.PtrArrays]]

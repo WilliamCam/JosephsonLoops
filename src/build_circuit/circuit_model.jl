@@ -1,70 +1,122 @@
-
-#Display function uses
-function help()
-    println()
-    println("Use 'help()' to display this")
-    println()
-    println("Use 'open_file(name)' to open an existing .jdl2 file to extract circuit data")
-    println()
-    println("Use 'symbolic_assign()' to input numerical values for variables that are still in symbolic form")
-    println("   - Symbolically assigned variables are temporary only, upon using net_edit() to change parameters symbolic variables return")
-    println()
-    println("Use 'net_edit(name)' to edit a netlist")
-    println("   - After using net_edit(), open_file() must be called again to load correct data")
-    println("   - Component parameters can also be edited by entering 'CPD[component] = new_parameter', (THIS IS TEMPORARY)")
-    println()
-    println("Use 'build(Φext)' to build the circuit based on the open file where Φext is the total external flux through the circuit")
-    println()
-    println("Use 'solve_init(old_u0, t_end)' to solve initial conditions for the model")
-    println()
-    println("Use 'sim_solve(u0, t_init, t_end)' to solve for a given timespan")
-    println("   - A specific solver algorithm can be used for sim_solve() by adding solver=ROS3P() as a parameter for example")
-    println()
-    println("Use 'single_plot(comp, param)' to plot the voltage or current through a component")
-    println("   - To plot voltage enter 'V' as the param")
-    println("   - To plot current enter 'i' as the param")
+#Netlist struct
+struct CircuitNetlist
+    loops::Vector{Vector{String}}
+    mutualInd::Vector{Tuple{Int64, Int64}}
+    comps::Dict{String, Vector{Int}}
+    params::Dict{String, Float64}
+    junctions::Vector{String}
+    σB::Matrix{Int64}
+    phaseParity::Dict{String, Vector{Int64}}
 end
 
-#Open an existing .jdl2 file to extract circuit data
-function open_file(name)
-    f_name = name
-    try
-        if endswith(f_name, ".jld2")
-            file = jldopen(f_name, "r")
-        else 
-            file = jldopen("$f_name.jld2", "r")
+#Find component parameters
+function find_components(loops::Vector{Vector{String}})
+    numLoops = size(loops)[1]                      #Number of loops in circuit
+    componentLoopDict = Dict{String, Vector{Int}}()
+    componentParamDict = Dict{String, Float64}()                    #Dictionary with components as keys and loops as values (used to find unique elements)
+    junctions = Vector{String}()                              #Stores the names of the junctions
+    for i in 1:numLoops                         #Iterate through all loops to find unique circuit components     
+        for j in 1:length(loops[i])             #Iterate components in current loop
+            componentLoopDict[loops[i][j]]=push!(get(componentLoopDict, loops[i][j], []), i-1) #Forms dict with unique circuit elements
         end
-    catch e
-        if isa(e, SystemError)
-            println("File does not exist")
-        end
-        #break?
-    end
-    if endswith(f_name, ".jld2")
-        file = jldopen(f_name, "r")
-    else 
-        file = jldopen("$f_name.jld2", "r")
-    end
-    #file = jldopen("$f_name.jld2", "r")
-    global numLoops = read(file, "editing/numLoops")
-    global componentLoopDict = read(file, "editing/componentLoopDict")
-    global CPD = read(file, "editing/componentParamDict")
-    global mutualInd = read(file, "editing/mutualInd")
-    global junctions = read(file, "editing/junctions")
-    global loops = read(file, "editing/loops")
-    global σA = read(file, "matrices/σA")
-    #σB = read(file, "matrices/σB")
-    global componentPhaseDirection = read(file, "matrices/componentPhaseDirection")
-    close(file)
-    print("File loaded \n circuit parameters:")
-    for param in keys(CPD)
-        print(string(param) * "\n")
     end
 
+    for comp in keys(componentLoopDict)         #Finds circiut component parameters
+        if (comp in keys(componentParamDict))   #If component already has parameter skip
+            if (comp[1] in ['V', 'R', 'C', 'J'])
+                push!(junctions, comp)
+            end
+            continue
+        elseif (comp[1] == 'V')                 #Gather data about voltage source 
+            push!(junctions, comp)
+            componentParamDict[comp] = 1.0
+        elseif (comp[1] == 'I')                 #Gather data about current source
+            componentParamDict[comp] = 1.0
+        elseif (comp[1] == 'R')                 #Gather data about resistor
+            push!(junctions, comp)
+            componentParamDict[comp] = 1.0
+        elseif (comp[1] == 'C')                 #Gather data about capacitor
+            push!(junctions, comp)
+            componentParamDict[comp] = 1.0
+        elseif (comp[1] == 'L')                 #Gather data about inductor
+            componentParamDict[comp] = 1.0
+        elseif (comp[1] == 'J')                 #Gather data about josephson junction
+            push!(junctions, comp)
+            componentParamDict[comp] = 1.0
+        end
+    end
+    return componentLoopDict, componentParamDict, junctions
 end
+
+#Use existing circuit data to form k, L, σA, σB and componentPhaseDirection
+function process_netlist(loops::Vector{Vector{String}},
+    mutualInd::Vector{Tuple{Int64, Int64}})
+
+    numLoops = size(loops)[1]
+    
+    componentLoopDict, componentParamDict, junctions = find_components(loops)
+
+    #Initialise σB matrices, and componentPhaseDirection dictionary            
+    σB = zeros(Int64, 0, numLoops)           
+    componentPhaseDirection = Dict{String, Vector{Int64}}() 
+
+    ### Algorithm for finding σB & σA & componentPhaseDirection
+    for i in 1:length(junctions)                                #Iterate through junctions
+        current_row = Vector{Int64}()
+        for j in 1:numLoops                                     #Iterate through loops
+            if junctions[i] in loops[j]                         #If current junction is in current loop
+                junc_loops = get(componentLoopDict, junctions[i], -1)   #Array containing the loops in which the current junction is present
+                loop_count = 0
+                for n in 1:length(junc_loops)
+                    loop_count = loop_count + junc_loops[n]     #Sum the loop number of the loops in which the current junction is present
+                end
+                #If the sum the loop number of the loops in which the current junction is present is greater than the current loop number 
+                #the direction of the phase is positive as the component must be on the RHS or bottom of the loop --- check readme.txt
+                if (loop_count/length(junc_loops) >= (j-1))     
+                    push!(current_row, 1)                       #Positive θ direction
+                else
+                    push!(current_row, -1)                      #Negative θ direction
+                end
+            else
+                push!(current_row, 0)                           #No θ direction as this component does not exist in loop j
+            end
+        end
+        componentPhaseDirection[junctions[i]] = current_row     #Push current_row to componentPhaseDirection dict
+        σB = [σB; current_row']                                 #Push current_row to σB matrix
+    end
+
+    #Set matrices as transpose of existing matrices
+    σA = transpose(σB)
+    circuit = CircuitNetlist(loops, mutualInd, componentLoopDict, componentParamDict, junctions, σB, componentPhaseDirection)
+    return circuit
+end
+
+"""Example Usage
+loops = [
+["J1","L1"],
+["L2","C1"],
+["C1","R1"],
+["R1","I1"]
+]
+
+coupling = [(1,2)]
+
+circuit = process_netlist(loops, coupling)
+"""
+
+
 
 #Build the circuit based on the open file
-function build_circuit(; dae_system = false)
+function build_circuit(circuit::CircuitNetlist)
+    #Load circuit from netlist
+    loops = circuit.loops
+    numLoops = size(loops)[1]
+    componentLoopDict = circuit.comps
+    CPD = circuit.phaseParity
+    mutualInd = circuit.mutualInd
+    junctions = circuit.junctions
+    σA = transpose(circuit.σB)
+
 
     eqs = Equation[]                                        #Array to store equations
     built_loops = []
@@ -183,20 +235,15 @@ function build_circuit(; dae_system = false)
     #Functions from model_builder.jl to form appropriate equations
     
     add_loops!(eqs, built_loops, σA, θcomponents, L)
-    current_flow(eqs, componentPhaseDirection, built_loops, θcomponents)
+    current_flow(eqs, CPD, built_loops, θcomponents)
     
     
     
 
     @named _model  =  ODESystem(eqs, t)                     #Create an ODESystem with the existing equations
 
-    @named model = compose(_model, sys)                     #Compose the existing ODESystem with the system states vector
-    if dae_system == true
-        new_model = mtkcompile(dae_index_lowering(model))
-    else
-        new_model = mtkcompile(model)                #structural_simplify Algorithm to improve performance
-    end
-
+    @named model = compose(_model, sys)                    
+    new_model = mtkcompile(model)                #structural_simplify Algorithm to improve performance
     return new_model, u0
                                  #Return structuraly simplified model and initial conditions
 end
