@@ -95,16 +95,18 @@ function harmonic_equation(eqs, states, tvar, wvar, N)
         harmonic_eqs = substitute(harmonic_eqs, Dict(Differential(tvar)(states[k])=>dXdt))
         harmonic_eqs = substitute(harmonic_eqs, Dict(states[k]=>harmonic_state))
     end
-    #debuggin
-    return harmonic_eqs
+    Nt = 2*N+1
     for k in 1:M
-        for n in 1:(N+1)
-            if n==1
-                push!(harmonic_system, 0~sum(collect_static_terms(harmonic_eqs[k], tvar)))
-            else
-                push!(harmonic_system, 0~sum(collect_terms(harmonic_eqs[k], cos((n-1)*wvar*tvar))))
-                push!(harmonic_system, 0~sum(collect_terms(harmonic_eqs[k], sin((n-1)*wvar*tvar))))
-            end
+        res_expr = Symbolics.simplify(harmonic_eqs[k].lhs - harmonic_eqs[k].rhs)
+        for n in 0:(Nt-1)
+            # phase angle (numeric) -> phi_n = 2π*n/Nt
+            phi_n = 2*pi*n/Nt
+            # substitute tvar -> phi_n / wvar to evaluate residual at that phase
+            # Note: this causes terms like cos(m*w*t) to become cos(m*phi_n), purely numeric
+            res_at_coll = substitute(res_expr, Dict(tvar => phi_n / wvar))
+            # Optionally simplify trig of numeric arguments
+            #res_at_coll = QuestBase.trig_reduce(Symbolics.expand(res_at_coll))
+            push!(harmonic_system, res_at_coll ~ 0)
         end
     end
     return harmonic_system, X
@@ -132,60 +134,8 @@ function is_term(set, target_term)
     return ret
 end
 
-function collect_terms(eq::Equation, target_term::Num)
-    terms = Num[]
-    new_eq = eq.lhs-eq.rhs~0
-    expr = QuestBase.trig_reduce(Symbolics.expand(new_eq.lhs))
-    num_to_sym = expr~0
-    if operation(num_to_sym.lhs) != +
-        if operation(num_to_sym.lhs) == /
-            fractional_expr = QuestBase.expand_fraction(num_to_sym.lhs)
-            expr = Symbolics.arguments(fractional_expr)
-        else
-            print("Could not simplify equation")
-            return operation(num_to_sym.lhs)
-        end
-    else
-        expr = Symbolics.arguments(num_to_sym.lhs)
-    end
-    return expr
-    for term in expr
-        if isequal(Symbolics.coeff(term, target_term), Num(0))
-            continue
-        else
-            push!(terms, Num(Symbolics.coeff(term, target_term)))
-        end
-    end
-    return terms
-end
 
-function collect_static_terms(eq::Equation, indvar::Num)
-    terms=Num[]
-    new_eq = eq.lhs-eq.rhs~0
-    expr = QuestBase.trig_reduce(Symbolics.expand(new_eq.lhs))
-    num_to_sym = expr~0
-    if operation(num_to_sym.lhs) != +
-        if operation(num_to_sym.lhs) == /
-            fractional_expr = QuestBase.expand_fraction(num_to_sym.lhs)
-            expr = Symbolics.arguments(fractional_expr)
-        else
-            print("Could not simplify equation")
-            return operation(test4.lhs)
-        end
-    else
-        expr = Symbolics.arguments(num_to_sym.lhs)
-    end
-    for term in expr
-        if is_term(Num(term), indvar)
-            continue
-        else
-            push!(terms,term)
-        end
-    end
-    return terms
-end
-
-##### Example Usage
+#### Example Usage
 
 # @variables t x(t) # declare constant variables and a function x(t)
 # @parameters  α ω ω0 F η 
@@ -203,11 +153,11 @@ end
 # solution=[]
 
 # for i in 1:1:N
-#     ps = [α => 0.05, ω0 => 1.0, F => 0.01, η => 0.1, ω=> ω_vec[i]]
+#     ps = [α => 0.05, ω0 => 1.0, F => 10, η => 0.1, ω=> ω_vec[i]]
 #     prob = NonlinearProblem(sys,zeros(2*Nharmonics+1), ps)
 #     sol = solve(prob)
 #     push!(solution,  sol[ns.A[1]] + sqrt(sol[ns.A[4]]^2+sol[ns.B[3]]^2))
 # end
 
-# plot(ω_vec, solution)
+# plot(solution)
 

@@ -50,7 +50,7 @@ end
 
 #Use existing circuit data to form k, L, σA, σB and componentPhaseDirection
 function process_netlist(loops::Vector{Vector{String}},
-    mutualInd::Vector{Tuple{Int64, Int64}})
+    mutualInd = [])
 
     numLoops = size(loops)[1]
     
