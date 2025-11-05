@@ -23,14 +23,12 @@ function find_components(loops::Vector{Vector{String}})
 
     for comp in keys(componentLoopDict)         #Finds circiut component parameters
         if (comp in keys(componentParamDict))   #If component already has parameter skip
-            if (comp[1] in ['V', 'R', 'C', 'J'])
+            if (comp[1] in ['I', 'R', 'C', 'J'])
                 push!(junctions, comp)
             end
             continue
-        elseif (comp[1] == 'V')                 #Gather data about voltage source 
-            push!(junctions, comp)
-            componentParamDict[comp] = 1.0
-        elseif (comp[1] == 'I')                 #Gather data about current source
+        elseif (comp[1] == 'I')
+            push!(junctions, comp)                 #Gather data about current source
             componentParamDict[comp] = 1.0
         elseif (comp[1] == 'R')                 #Gather data about resistor
             push!(junctions, comp)
@@ -49,8 +47,7 @@ function find_components(loops::Vector{Vector{String}})
 end
 
 #Use existing circuit data to form k, L, σA, σB and componentPhaseDirection
-function process_netlist(loops::Vector{Vector{String}},
-    mutualInd = [])
+function process_netlist(loops::Vector{Vector{String}}; mutualInd = Vector[])
 
     numLoops = size(loops)[1]
     
@@ -90,22 +87,6 @@ function process_netlist(loops::Vector{Vector{String}},
     circuit = CircuitNetlist(loops, mutualInd, componentLoopDict, componentParamDict, junctions, σB, componentPhaseDirection)
     return circuit
 end
-
-"""Example Usage
-loops = [
-["J1","L1"],
-["L2","C1"],
-["C1","R1"],
-["R1","I1"]
-]
-
-coupling = [(1,2)]
-
-circuit = process_netlist(loops, coupling)
-"""
-
-
-
 #Build the circuit based on the open file
 function build_circuit(circuit::CircuitNetlist)
     #Load circuit from netlist
@@ -117,60 +98,35 @@ function build_circuit(circuit::CircuitNetlist)
     junctions = circuit.junctions
     σA = transpose(circuit.σB)
 
-
-    eqs = Equation[]                                        #Array to store equations
-    built_loops = []
                                                          #Array to store loops that have been built using MTK
-    for i in 1:numLoops                                     #Iterate through all loops
-        println("loop $(i)")                              #Display loop name
-        current_loop = false
-        c_source = ""
-        for comp in loops[i]                                #Determine if a loop is a curernt source loop
-            if startswith(comp, 'I')
-                current_loop = true
-                c_source = comp
-            end
-        end
-        if (current_loop)                                   #Build a current source loop
-            new_l = "@named loop$(i) = build_current_source_loop()"
-            new_l = Meta.parse(new_l)
-            new_l = eval(new_l)
-        else                                                #Build a normal loop (no current source)
-            new_l = "@named loop$(i) = build_loop()"
-            new_l = Meta.parse(new_l)                       #Using metaprogramming to generate loops with unique names and parameters
-            new_l = eval(new_l)
-        end
-        push!(built_loops, new_l)                           #Push built loop to built_loops array
-    end
-
-    built_components = OrderedDict()                               #Dictionary to store components that have been built with MTK
+    built_components = OrderedDict()                        #Dictionary to store components that have been built with MTK
     for j in junctions                                      #Iterate through juncrions
         println(j)                                          #Display junction name
         if (j[1] == 'R')                                    #Built resistor case
             param = get(CPD, j, 0)
-            new_c = "@named $j = build_resistor()"
+            new_c = "@named $j = Resistor()"
             new_c = Meta.parse(new_c)                       #Using metaprogramming to generate components with unique names and parameters
             new_c = eval(new_c)
             built_components[j] = new_c                     #Push component to built components dictionary
         elseif (j[1] == 'C')                                #Built capacitor case
             param = get(CPD, j, 0)
-            new_c = "@named $j = build_capacitor()"
-            new_c = Meta.parse(new_c)
-            new_c = eval(new_c)
-            built_components[j] = new_c
-        elseif (j[1] == 'V')                                #Built voltage source case
-            param = get(CPD, j, 0)
-            new_c = "@named $j = build_voltage_source()"
+            new_c = "@named $j = Capacitor()"
             new_c = Meta.parse(new_c)
             new_c = eval(new_c)
             built_components[j] = new_c
         elseif (j[1] == 'J')                                #Built Josephson Junction case
             params = get(CPD, j, 0)
-            new_c = "@named $j = build_JJ()"
+            new_c = "@named $j = JosephsonJunction()"
             new_c = Meta.parse(new_c)
             new_c = eval(new_c)
             built_components[j] = new_c
-        end   
+        elseif (j[1] == 'I')                                #Built Josephson Junction case
+            params = get(CPD, j, 0)
+            new_c = "@named $j = CurrentSource()"
+            new_c = Meta.parse(new_c)
+            new_c = eval(new_c)
+            built_components[j] = new_c
+        end
     end
     ### Algorithm for finding L
     L = zeros(Num, numLoops, numLoops)
@@ -180,14 +136,12 @@ function build_circuit(circuit::CircuitNetlist)
             Lij = 0                                           #Float storing the value of the (j,i) position in matrix L
             #SELF COUPLING
             for n in loops[i]                                   #Iterate through components in loop i
-                if ((n[1] == 'J') || (n[1] == 'L'))
+                if ((n[1] == 'L'))
                     if (j-1 in get(componentLoopDict, n, -1))   #If component n is also in the loop j
-                        if (n[1] == 'J')
-                            param = eval(Meta.parse(n * ".sys.L"))    #JJ case for setting param
-                        elseif (n[1] == 'L')
-                            eval(Meta.parse("@named " *n* " = build_inductance()"))
-                            #built_components[n] = eval(Meta.parse(n))    
-                            param = eval(Meta.parse(n*".sys.L"))     #Inductor case for setting param
+                        if (n[1] == 'L')
+                            eval(Meta.parse("@named " *n* " = Inductor()"))
+                            built_components[n] = eval(Meta.parse(n))    
+                            param = eval(Meta.parse(n*".L"))     #Inductor case for setting param
                         end
                         if (i == j)
                             Lij = Lij + param     #Adjust Lij by the value of the inductance of component n
@@ -199,9 +153,9 @@ function build_circuit(circuit::CircuitNetlist)
             end
             #MUTUAL COUPLING
             for n in mutualInd
-                eval(Meta.parse("@named M" * string(n[1])*string(n[2]) * "= build_inductance()"))
+                eval(Meta.parse("@named M" * string(n[1])*string(n[2]) * "= Inductor()"))
                 built_components["M" *string(n[1])*string(n[2])] = eval(Meta.parse("M" * string(n[1])*string(n[2]))) 
-                param = eval(Meta.parse("M" * string(n[1])*string(n[2]) * ".sys.L"))
+                param = eval(Meta.parse("M" * string(n[1])*string(n[2]) * ".L"))
                 if ((i != j) && (i in n) && (j in n)) #If the two currently observed loops are not the same loop and are stated as having mutual inductance
                     Lij = Lij - param              #Adjust Lij by the value of the mutual inductance
                 end
@@ -211,39 +165,54 @@ function build_circuit(circuit::CircuitNetlist)
         L[j,:] = current_row'                                #current_row is pushed to the L matrix
     end
                                  
-    old_sys = []                                            #Array to store system states                                          
-    u0 = Pair{Num, Any}[]                               #Array to store system initial condionts  (Set to 0)
-
-    θcomponents = OrderedDict()                                        #Array to store components with phase differnece θ
-    for comp in built_components                            #Iterate through components to find component  system states and intial conditons
-        push!(old_sys, comp[2].sys)
-        if  !(comp[1][1] in ['L', 'M'])
-            push!(u0, comp[2].sys.θ=>nothing)                   #θ initialised to 0
-            push!(u0, comp[2].sys.i=>0.0)                   #i initialised to 0
-            θcomponents[comp[1]] = comp[2]
-            if (uppercase(comp[1][1]) in ['C', 'J', 'V', 'R'])   
-                push!(u0, D(comp[2].sys.θ)=>0.0)            #D(θ) initialised to 0 for capacitors, JJs and voltage sources
+    already_in_loop = String[]
+    eqs=Equation[]
+    for i in 1:length(loops)
+        connectables = []
+        for component_name in keys(circuit.comps)
+            if i-1 in circuit.comps[component_name]
+                comp_system = built_components[component_name]
+                if component_name in already_in_loop
+                    push!(connectables, comp_system.out)
+                else
+                    push!(connectables, comp_system.in)
+                    push!(already_in_loop, component_name)
+                end
             end
         end
+        for M in mutualInd
+            if i in M
+                component_name = "M$(M[1])$(M[2])"
+                M_sys = built_components[component_name]
+                if component_name in already_in_loop
+                    push!(connectables, M_sys.out)
+                else
+                    push!(connectables, M_sys.in)
+                    push!(already_in_loop, component_name)
+                end
+            end
+        end
+        push!(eqs, connect(connectables...))
     end
-    for loop in built_loops                                 #Iterate through components to find loop system states
-        push!(old_sys, loop.sys)
-        push!(u0, loop.sys.iₘ=>nothing)                 #iₘ initialised to 0
+
+    ground_loop_connectables = []
+    for (comp, vals) in circuit.comps
+        if length(vals) == 1
+            comp_system = built_components[comp]
+            push!(ground_loop_connectables, comp_system.out)
+        end
     end
-    sys = Vector{ODESystem}(old_sys)                        #Convert system states array to an ODESystem vector form
+    @named ground = GroundLoop()
+    push!(ground_loop_connectables, ground.g)
+    push!(eqs, connect(ground_loop_connectables...))
 
-    #Functions from model_builder.jl to form appropriate equations
-    
-    add_loops!(eqs, built_loops, σA, θcomponents, L)
-    current_flow(eqs, CPD, built_loops, θcomponents)
-    
-    
-    
+    built_components["ground"] = ground
 
-    @named _model  =  ODESystem(eqs, t)                     #Create an ODESystem with the existing equations
 
-    @named model = compose(_model, sys)                    
-    new_model = mtkcompile(model)                #structural_simplify Algorithm to improve performance
-    return new_model, u0
-                                 #Return structuraly simplified model and initial conditions
+    @named _model = System(eqs, t)
+    @named model = compose(_model, built_components.vals)                    
+    new_model = mtkcompile(model)
+    return new_model                             
 end
+
+
