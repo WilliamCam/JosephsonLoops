@@ -96,7 +96,7 @@ function harmonic_equation(eqs, states, tvar, wvar, N)
         harmonic_eqs = substitute(harmonic_eqs, Dict(states[k]=>harmonic_state))
     end
     #debuggin
-    return harmonic_eqs
+    #return harmonic_eqs
     for k in 1:M
         for n in 1:(N+1)
             if n==1
