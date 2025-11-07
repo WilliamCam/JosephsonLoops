@@ -199,12 +199,11 @@ function build_circuit(circuit::CircuitNetlist)
     push!(ground_loop_connectables, ground.g)
     push!(eqs, connect(ground_loop_connectables...))
     built_components["ground"] = ground
-
     sys = [x[2] for x in built_components]
     @named _model = System(eqs, t)
     @named model = compose(_model,sys)                    
     new_model = mtkcompile(model)
-    return new_model                             
+    return new_model, model                             
 end
 
 
@@ -244,3 +243,14 @@ function construct_L_matrix(loops, component_loop_mapping, mutual_coupling)
         L[j,:] = current_row'                               
     end
 end
+
+
+loops = [["I1", "C1"],
+["C1", "R2"]]
+ext_flux = [false, false]
+
+circuit = process_netlist(loops, ext_flux=ext_flux)
+
+#cirucit model ODAE system and initial condition vector are created.
+model = build_circuit(circuit)
+
