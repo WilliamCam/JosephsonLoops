@@ -62,7 +62,7 @@ end
         Φₑ = 1.0
     end
     @equations begin
-        Φₑ ~ in.Φ  
+        Φₑ ~ -in.Φ  
     end
 end
 

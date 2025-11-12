@@ -10,12 +10,14 @@ loops = [
 ["R1", "C1", "J1"]
 ]
 
-ext_flux = [false, false]
+ext_flux = [false, true]
 
-circuit = jls.process_netlist(loops)
+circuit = jls.process_netlist(loops, ext_flux=ext_flux)
 
 #cirucit model ODAE system and initial condition vector are created.
 model, x = jls.build_circuit(circuit)
+
+
 
 # we set the values of circuit parameters, for any parameters not specified; default values will be assigned.
     ps = [
@@ -59,9 +61,9 @@ plot(x.u)
 #Harmonic Balance
 eqs, states = jls.get_full_equations(model, jls.t)
 
-harmonic_sys, harmonic_states = jls.harmonic_equation(eqs, states, jls.t, jls.I1.ω, 1)
+harmonic_sys, harmonic_states = jls.harmonic_equation(eqs, states, jls.t, jls.I1.ω, 3)
 
-@named ns = NonlinearSystem(harmonic_sys[1:14])
+@named ns = NonlinearSystem(harmonic_sys[1:5])
 
 sys = structural_simplify(ns)
 
@@ -87,7 +89,7 @@ for i in 1:1:length(ω_vec)
         jls.R1.R => 50.0
         jls.J1.R => 1.0
     ]
-    prob = NonlinearProblem(sys,zeros(12), ps)
+    prob = NonlinearProblem(sys,zeros(4), ps)
     sol = solve(prob)
     u0_prev = sol
     push!(solution1, sol[ns.A[1]]+ sqrt(sol[ns.A[2]]^2+sol[ns.B[1]]^2) + sqrt(sol[ns.C[2]]^2+sol[ns.D[1]]^2))

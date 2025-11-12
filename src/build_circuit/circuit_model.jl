@@ -195,10 +195,12 @@ function build_circuit(circuit::CircuitNetlist)
             push!(ground_loop_connectables, comp_system.out)
         end
     end
-    @named ground = GroundLoop()
-    push!(ground_loop_connectables, ground.g)
+    eval(Meta.parse("@named ground" * "= GroundLoop()"))
+    built_components["ground"] = eval(Meta.parse("ground"))
+    g_sys = built_components["ground"]
+    push!(ground_loop_connectables, g_sys.g)
     push!(eqs, connect(ground_loop_connectables...))
-    built_components["ground"] = ground
+    
     sys = [x[2] for x in built_components]
     @named _model = System(eqs, t)
     @named model = compose(_model,sys)                    
