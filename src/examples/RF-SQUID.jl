@@ -11,7 +11,7 @@ coupling = [(1,2)]
 ext_flux = [true, false, false, false]
 circuit = jls.process_netlist(loops, mutual_coupling = coupling, ext_flux = ext_flux)
 
-model = jls.build_circuit(circuit)  
+model, x = jls.build_circuit(circuit)  
 
 I₀ = 1.0e-6
 R₀ = 5.0

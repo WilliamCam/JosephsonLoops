@@ -155,6 +155,7 @@ function build_circuit(circuit::CircuitNetlist)
     end                                 
     already_in_loop = String[]
     eqs=Equation[]
+    ground_loop_connectables = []
     for i in 1:length(loops)
         connectables = []
         for component_name in keys(component_loop_mapping)
@@ -184,17 +185,19 @@ function build_circuit(circuit::CircuitNetlist)
             component_name = "Φₑ$(i)"
             k_sys = built_components[component_name]
             push!(connectables, k_sys.in)
+            push!(ground_loop_connectables, k_sys.out)
         end
         push!(eqs, connect(connectables...))
     end
 
-    ground_loop_connectables = []
+    
     for (comp, vals) in component_loop_mapping
         if length(vals) == 1
             comp_system = built_components[comp]
             push!(ground_loop_connectables, comp_system.out)
         end
     end
+
     eval(Meta.parse("@named ground" * "= GroundLoop()"))
     built_components["ground"] = eval(Meta.parse("ground"))
     g_sys = built_components["ground"]
@@ -205,7 +208,15 @@ function build_circuit(circuit::CircuitNetlist)
     @named _model = System(eqs, t)
     @named model = compose(_model,sys)                    
     new_model = mtkcompile(model)
-    return new_model, model                             
+
+    guesses = Pair{Num,Float64}[]
+    u0 = Pair{Num,Float64}[]
+    for state_var in unknowns(new_model)
+        push!(guesses, state_var => 0.0)
+        push!(u0, D(state_var) => 0.0)
+    end
+
+    return new_model, u0, guesses                             
 end
 
 

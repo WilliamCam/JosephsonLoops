@@ -4,21 +4,18 @@
 using JosephsonLoops 
 const jls = JosephsonLoops
 
-
 loops = [
 ["I1", "R1"],
 ["R1", "C1", "J1"]
 ]
 
-ext_flux = [false, true]
+ext_flux = [true, true]
+
 
 circuit = jls.process_netlist(loops, ext_flux=ext_flux)
 
 #cirucit model ODAE system and initial condition vector are created.
-model, x = jls.build_circuit(circuit)
-
-
-
+model, u0, guesses = jls.build_circuit(circuit)
 # we set the values of circuit parameters, for any parameters not specified; default values will be assigned.
     ps = [
         jls.I1.ω => 100e6*2*pi
@@ -28,6 +25,7 @@ model, x = jls.build_circuit(circuit)
         jls.J1.I0 => 1e-6
         jls.R1.R => 50.0
         jls.J1.R => 1.0
+        jls.Φₑ2.Φₑ => 0.5
     ]
 using DifferentialEquations
 
@@ -35,11 +33,17 @@ using DifferentialEquations
 tspan = (0.0, 1e-6)
 using DifferentialEquations
 # Create dictionary of initial conditions
-u0 = Dict(u => 0.0 for u in unknowns(model))
-prob = DAEProblem(model, u0, tspan, ps)
+
+
+#u0 = Dict(u => 0.0 for u in unknowns(model))
+prob = ODEProblem(model, u0, tspan, ps, guesses=guesses)
+sol = solve(prob, Rodas5())
+using Plots
+plot(sol[jls.C1.i])
+
 #transient circuit analysis
-sol = jls.tsolve(model, u0, tspan, ps, alg = Rodas5())
-jls.tplot(sol, jls.R1, units = "amps")
+sol = jls.tsolve(model, [] tspan, ps, alg = Rodas5())
+jls.tplot(sol, jls.C1, units = "amps")
 
 # we can pass any arguments known to the problem interface of DifferentialEquations.jl, to achieve better results
 
@@ -59,13 +63,15 @@ plot(x.u)
 
 
 #Harmonic Balance
+include("../harmonic balance/colocation HB.jl")
 eqs, states = jls.get_full_equations(model, jls.t)
 
 harmonic_sys, harmonic_states = jls.harmonic_equation(eqs, states, jls.t, jls.I1.ω, 3)
+ns, harmonic_states = harmonic_equation(eqs, states, jls.t, jls.I1.ω, 3)
 
-@named ns = NonlinearSystem(harmonic_sys[1:5])
+@named ns = NonlinearSystem(harmonic_sys)
+sys =  ModelingToolkit.complete(structural_simplify(ns, fully_determined = false))
 
-sys = structural_simplify(ns)
 
 I₀ = 1e-6
 R₀ = 5.0

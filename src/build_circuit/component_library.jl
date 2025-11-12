@@ -57,12 +57,14 @@ end
 @mtkmodel ExternalFlux begin
     @components begin
         in = Loop()
+        out = Loop()
     end
     @parameters begin
         Φₑ = 1.0
     end
     @equations begin
-        Φₑ ~ -in.Φ  
+        Φₑ ~ -in.Φ
+        0 ~ in.Φ + out.Φ #Flux flowing from left loop is equal to flux entering  
     end
 end
 
