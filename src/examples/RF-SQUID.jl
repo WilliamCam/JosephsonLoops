@@ -14,7 +14,7 @@ loops = [
 
 coupling = [(1,2)]
 
-circuit = jls.process_netlist(loops, mutalInd = coupling)
+circuit = jls.process_netlist(loops)
 
 #cirucit model ODAE system and initial condition vector are created.
 model, u0 = jls.build_circuit(circuit)

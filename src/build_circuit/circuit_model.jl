@@ -49,8 +49,7 @@ function find_components(loops::Vector{Vector{String}})
 end
 
 #Use existing circuit data to form k, L, σA, σB and componentPhaseDirection
-function process_netlist(loops::Vector{Vector{String}},
-    mutualInd = [])
+function process_netlist(loops::Vector{Vector{String}}; mutualInd = [])
 
     numLoops = size(loops)[1]
     
