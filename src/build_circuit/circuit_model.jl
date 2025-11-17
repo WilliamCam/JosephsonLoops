@@ -1,248 +1,269 @@
 #Netlist struct
+"""
+    process_netlist(loops::Vector{Vector{String}}; mutual_coupling::Vector{Tuple{Int64, Int64}} = [], ext_flux::Vector{Int64} = []) -> CircuitNetlist
+
+Processes a circuit netlist defined by loops and creates a `CircuitNetlist` structure containing the components, mutual coupling information, and external flux values.
+
+# Arguments
+- `loops::Vector{Vector{String}}`: A vector of vectors, where each inner vector represents a loop containing component names as strings.
+- `mutual_coupling::Vector{Tuple{Int64, Int64}}`: An optional vector of tuples representing mutual coupling between loops. Defaults to an empty vector.
+- `ext_flux::Vector{Bool}`: An optional vector of external flux offsets associated with the loops. Defaults to an empty vector.
+
+# Returns
+- `CircuitNetlist`: A `CircuitNetlist` object that encapsulates the processed information, including loops, mutual coupling, external flux, component mappings, and identified branches.
+
+# Example
+```julia
+loops = [["R1", "C1"], ["I1", "R1"], ["J1", "L1"]]
+circuit = process_netlist(loops; mutual_coupling=[(1, 2)], ext_flux=[1])
+```
+"""
 struct CircuitNetlist
     loops::Vector{Vector{String}}
-    mutualInd::Vector{Tuple{Int64, Int64}}
-    comps::Dict{String, Vector{Int}}
-    params::Dict{String, Float64}
-    junctions::Vector{String}
-    σB::Matrix{Int64}
-    phaseParity::Dict{String, Vector{Int64}}
+    mutual_coupling::Vector{Tuple{Int64, Int64}}
+    ext_flux::Vector{Bool}
+    components::Dict{String, Vector{Int}}
+    branches::Vector{String}
 end
 
-#Find component parameters
 function find_components(loops::Vector{Vector{String}})
-    numLoops = size(loops)[1]                      #Number of loops in circuit
-    componentLoopDict = Dict{String, Vector{Int}}()
-    componentParamDict = Dict{String, Float64}()                    #Dictionary with components as keys and loops as values (used to find unique elements)
-    junctions = Vector{String}()                              #Stores the names of the junctions
-    for i in 1:numLoops                         #Iterate through all loops to find unique circuit components     
-        for j in 1:length(loops[i])             #Iterate components in current loop
-            componentLoopDict[loops[i][j]]=push!(get(componentLoopDict, loops[i][j], []), i-1) #Forms dict with unique circuit elements
+    numLoops = size(loops)[1]                      
+    component_loop_mapping = Dict{String, Vector{Int}}()
+    branches = Vector{String}()               
+    for i in 1:numLoops                        
+        for j in 1:length(loops[i])            
+            component_loop_mapping[loops[i][j]]=push!(get(component_loop_mapping, loops[i][j], []), i-1) 
         end
     end
 
-    for comp in keys(componentLoopDict)         #Finds circiut component parameters
-        if (comp in keys(componentParamDict))   #If component already has parameter skip
-            if (comp[1] in ['V', 'R', 'C', 'J'])
-                push!(junctions, comp)
-            end
-            continue
-        elseif (comp[1] == 'V')                 #Gather data about voltage source 
-            push!(junctions, comp)
-            componentParamDict[comp] = 1.0
-        elseif (comp[1] == 'I')                 #Gather data about current source
-            componentParamDict[comp] = 1.0
-        elseif (comp[1] == 'R')                 #Gather data about resistor
-            push!(junctions, comp)
-            componentParamDict[comp] = 1.0
-        elseif (comp[1] == 'C')                 #Gather data about capacitor
-            push!(junctions, comp)
-            componentParamDict[comp] = 1.0
-        elseif (comp[1] == 'L')                 #Gather data about inductor
-            componentParamDict[comp] = 1.0
-        elseif (comp[1] == 'J')                 #Gather data about josephson junction
-            push!(junctions, comp)
-            componentParamDict[comp] = 1.0
+    for comp in keys(component_loop_mapping)
+        if (comp[1] in ['I', 'R', 'C', 'J', 'L'])
+            push!(branches, comp)
         end
     end
-    return componentLoopDict, componentParamDict, junctions
+    return component_loop_mapping, branches
 end
 
-#Use existing circuit data to form k, L, σA, σB and componentPhaseDirection
-function process_netlist(loops::Vector{Vector{String}}; mutualInd = [])
-
+function process_netlist(
+    loops::Vector{Vector{String}}; 
+    mutual_coupling::Vector{Tuple{Int,Int}} = Vector{Tuple{Int,Int}}(), 
+    ext_flux::Vector{Bool} = Vector{Bool}()
+)
     numLoops = size(loops)[1]
-    
-    componentLoopDict, componentParamDict, junctions = find_components(loops)
-
-    #Initialise σB matrices, and componentPhaseDirection dictionary            
-    σB = zeros(Int64, 0, numLoops)           
-    componentPhaseDirection = Dict{String, Vector{Int64}}() 
-
-    ### Algorithm for finding σB & σA & componentPhaseDirection
-    for i in 1:length(junctions)                                #Iterate through junctions
-        current_row = Vector{Int64}()
-        for j in 1:numLoops                                     #Iterate through loops
-            if junctions[i] in loops[j]                         #If current junction is in current loop
-                junc_loops = get(componentLoopDict, junctions[i], -1)   #Array containing the loops in which the current junction is present
-                loop_count = 0
-                for n in 1:length(junc_loops)
-                    loop_count = loop_count + junc_loops[n]     #Sum the loop number of the loops in which the current junction is present
-                end
-                #If the sum the loop number of the loops in which the current junction is present is greater than the current loop number 
-                #the direction of the phase is positive as the component must be on the RHS or bottom of the loop --- check readme.txt
-                if (loop_count/length(junc_loops) >= (j-1))     
-                    push!(current_row, 1)                       #Positive θ direction
-                else
-                    push!(current_row, -1)                      #Negative θ direction
-                end
-            else
-                push!(current_row, 0)                           #No θ direction as this component does not exist in loop j
-            end
-        end
-        componentPhaseDirection[junctions[i]] = current_row     #Push current_row to componentPhaseDirection dict
-        σB = [σB; current_row']                                 #Push current_row to σB matrix
+    if ext_flux == []
+        flux_vector = fill(false, numLoops)
+    else
+        flux_vector = ext_flux
     end
-
-    #Set matrices as transpose of existing matrices
-    σA = transpose(σB)
-    circuit = CircuitNetlist(loops, mutualInd, componentLoopDict, componentParamDict, junctions, σB, componentPhaseDirection)
+    if length(flux_vector) != length(loops)
+        throw(ArgumentError("Mutual flux vector must be equal to number of circuit loops"))
+    end
+    component_loop_mapping, branches = find_components(loops)
+    circuit = CircuitNetlist(loops, mutual_coupling, flux_vector, component_loop_mapping, branches)
     return circuit
 end
 
-"""Example Usage
-loops = [
-["J1","L1"],
-["L2","C1"],
-["C1","R1"],
-["R1","I1"]
-]
+"""
+    build_circuit(circuit::CircuitNetlist) -> ODESystem
 
-coupling = [(1,2)]
+Constructs a ModelingToolkit ODESystem from a CircuitNetlist by creating and connecting circuit components.
 
-circuit = process_netlist(loops, coupling)
+# Arguments
+- `circuit::CircuitNetlist`: A CircuitNetlist object containing:
+  - `loops`: Vector of vectors defining circuit loops
+  - `components`: Dictionary mapping component names to their loop indices
+  - `mutual_coupling`: Vector of tuples defining mutual inductance coupling
+  - `branches`: Vector of component names that form branches
+
+# Returns
+- A compiled ModelingToolkit ODESystem representing the circuit equations
+
+# Details
+- Creates ModelingToolkit components based on first letter of component name:
+  - 'R': Resistor
+  - 'C': Capacitor 
+  - 'J': Josephson Junction
+  - 'I': Current Source
+  - 'L': Inductor
+- Automatically handles mutual inductance coupling
+- Creates ground node connections for components in single loops
+- Composes final system from component equations and connections
+
+# Example
+```julia
+loops = [["R1", "C1"], ["I1", "R1"]]
+circuit = process_netlist(loops)
+model = build_circuit(circuit)
+```
+
+# Throws
+- `ArgumentError`: If an unrecognized component type is found in the netlist
 """
 
-
-
-#Build the circuit based on the open file
 function build_circuit(circuit::CircuitNetlist)
     #Load circuit from netlist
     loops = circuit.loops
     numLoops = size(loops)[1]
-    componentLoopDict = circuit.comps
-    CPD = circuit.phaseParity
-    mutualInd = circuit.mutualInd
-    junctions = circuit.junctions
-    σA = transpose(circuit.σB)
+    component_loop_mapping = circuit.components
+    mutual_coupling = circuit.mutual_coupling
+    branches = circuit.branches
+    ext_flux = circuit.ext_flux
 
+    #Use meta programming to construct MTK component objects parsing their given name.
+    built_components = Dict()                               
+    for j in branches                                      
+        println(j)                                          
+        if (j[1] == 'R')                                    
+            new_c = "@named $j = Resistor()"
+            new_c = Meta.parse(new_c)                      
+            new_c = eval(new_c)
+            built_components[j] = new_c                     
+        elseif (j[1] == 'C')                                
+            new_c = "@named $j = Capacitor()"
+            new_c = Meta.parse(new_c)
+            new_c = eval(new_c)
+            built_components[j] = new_c
+        elseif (j[1] == 'J')                                
+            new_c = "@named $j = JosephsonJunction()"
+            new_c = Meta.parse(new_c)
+            new_c = eval(new_c)
+            built_components[j] = new_c
+        elseif (j[1] == 'I')                                
+            new_c = "@named $j = CurrentSource()"
+            new_c = Meta.parse(new_c)
+            new_c = eval(new_c)
+            built_components[j] = new_c
+        elseif (j[1] == 'L')                                
+            new_c = "@named $j = Inductor()"
+            new_c = Meta.parse(new_c)
+            new_c = eval(new_c)
+            built_components[j] = new_c
+        else
+            throw(ArgumentError("Error: Netlist component was not recognised.Check docs for supported cirucit components and naming conventions."))
+        end
+    end
 
-    eqs = Equation[]                                        #Array to store equations
-    built_loops = []
-                                                         #Array to store loops that have been built using MTK
-    for i in 1:numLoops                                     #Iterate through all loops
-        println("loop $(i)")                              #Display loop name
-        current_loop = false
-        c_source = ""
-        for comp in loops[i]                                #Determine if a loop is a curernt source loop
-            if startswith(comp, 'I')
-                current_loop = true
-                c_source = comp
+    for n in mutual_coupling
+        eval(Meta.parse("@named M" * string(n[1])*string(n[2]) * "= Inductor()"))
+        built_components["M" *string(n[1])*string(n[2])] = eval(Meta.parse("M" * string(n[1])*string(n[2]))) 
+    end
+    for (i,k) in enumerate(ext_flux)
+        if k
+            eval(Meta.parse("@named Φₑ" * string(i) * "= ExternalFlux()"))
+            built_components["Φₑ" * string(i)] = eval(Meta.parse("Φₑ" * string(i)))
+        end
+    end                                 
+    already_in_loop = String[]
+    eqs=Equation[]
+    ground_loop_connectables = []
+    for i in 1:length(loops)
+        connectables = []
+        for component_name in keys(component_loop_mapping)
+            if i-1 in component_loop_mapping[component_name]
+                comp_system = built_components[component_name]
+                if component_name in already_in_loop
+                    push!(connectables, comp_system.out)
+                else
+                    push!(connectables, comp_system.in)
+                    push!(already_in_loop, component_name)
+                end
             end
         end
-        if (current_loop)                                   #Build a current source loop
-            new_l = "@named loop$(i) = build_current_source_loop()"
-            new_l = Meta.parse(new_l)
-            new_l = eval(new_l)
-        else                                                #Build a normal loop (no current source)
-            new_l = "@named loop$(i) = build_loop()"
-            new_l = Meta.parse(new_l)                       #Using metaprogramming to generate loops with unique names and parameters
-            new_l = eval(new_l)
+        for M in mutual_coupling
+            if i in M
+                component_name = "M$(M[1])$(M[2])"
+                M_sys = built_components[component_name]
+                if component_name in already_in_loop
+                    push!(connectables, M_sys.out)
+                else
+                    push!(connectables, M_sys.in)
+                    push!(already_in_loop, component_name)
+                end
+            end
         end
-        push!(built_loops, new_l)                           #Push built loop to built_loops array
+        if ext_flux[i]
+            component_name = "Φₑ$(i)"
+            k_sys = built_components[component_name]
+            push!(connectables, k_sys.in)
+            push!(ground_loop_connectables, k_sys.out)
+        end
+        push!(eqs, connect(connectables...))
     end
 
-    built_components = OrderedDict()                               #Dictionary to store components that have been built with MTK
-    for j in junctions                                      #Iterate through juncrions
-        println(j)                                          #Display junction name
-        if (j[1] == 'R')                                    #Built resistor case
-            param = get(CPD, j, 0)
-            new_c = "@named $j = build_resistor()"
-            new_c = Meta.parse(new_c)                       #Using metaprogramming to generate components with unique names and parameters
-            new_c = eval(new_c)
-            built_components[j] = new_c                     #Push component to built components dictionary
-        elseif (j[1] == 'C')                                #Built capacitor case
-            param = get(CPD, j, 0)
-            new_c = "@named $j = build_capacitor()"
-            new_c = Meta.parse(new_c)
-            new_c = eval(new_c)
-            built_components[j] = new_c
-        elseif (j[1] == 'V')                                #Built voltage source case
-            param = get(CPD, j, 0)
-            new_c = "@named $j = build_voltage_source()"
-            new_c = Meta.parse(new_c)
-            new_c = eval(new_c)
-            built_components[j] = new_c
-        elseif (j[1] == 'J')                                #Built Josephson Junction case
-            params = get(CPD, j, 0)
-            new_c = "@named $j = build_JJ()"
-            new_c = Meta.parse(new_c)
-            new_c = eval(new_c)
-            built_components[j] = new_c
-        end   
+    
+    for (comp, vals) in component_loop_mapping
+        if length(vals) == 1
+            comp_system = built_components[comp]
+            push!(ground_loop_connectables, comp_system.out)
+        end
     end
-    ### Algorithm for finding L
+
+    eval(Meta.parse("@named ground" * "= GroundLoop()"))
+    built_components["ground"] = eval(Meta.parse("ground"))
+    g_sys = built_components["ground"]
+    push!(ground_loop_connectables, g_sys.g)
+    push!(eqs, connect(ground_loop_connectables...))
+    
+    sys = [x[2] for x in built_components]
+    @named _model = System(eqs, t)
+    @named model = compose(_model,sys)                    
+    new_model = mtkcompile(model)
+
+    guesses = Pair{Num,Float64}[]
+    u0 = Pair{Num,Float64}[]
+    for state_var in unknowns(new_model)
+        push!(guesses, state_var => 0.0)
+        push!(u0, D(state_var) => 0.0)
+    end
+
+    return new_model, u0, guesses                             
+end
+
+
+
+#depreciated
+function construct_L_matrix(loops, component_loop_mapping, mutual_coupling)
+    ### Construction inductance matrix. Not strictly necessary and depreciated
     L = zeros(Num, numLoops, numLoops)
-    for j in 1:numLoops                                         #Iterate through all loops
+    for j in 1:numLoops                                        
         current_row = []
-        for i in 1:numLoops                                     #Second iteration through all loops
-            Lij = 0                                           #Float storing the value of the (j,i) position in matrix L
+        for i in 1:numLoops                                    
+            Lij = 0                                          
             #SELF COUPLING
-            for n in loops[i]                                   #Iterate through components in loop i
-                if ((n[1] == 'J') || (n[1] == 'L'))
-                    if (j-1 in get(componentLoopDict, n, -1))   #If component n is also in the loop j
-                        if (n[1] == 'J')
-                            param = eval(Meta.parse(n * ".sys.L"))    #JJ case for setting param
-                        elseif (n[1] == 'L')
-                            eval(Meta.parse("@named " *n* " = build_inductance()"))
-                            #built_components[n] = eval(Meta.parse(n))    
-                            param = eval(Meta.parse(n*".sys.L"))     #Inductor case for setting param
+            for n in loops[i]                                  
+                if ((n[1] == 'L'))
+                    if (j-1 in get(component_loop_mapping, n, -1))   
+                        if (n[1] == 'L')
+                            param = eval(Meta.parse(n*".L"))     
                         end
                         if (i == j)
-                            Lij = Lij + param     #Adjust Lij by the value of the inductance of component n
+                            Lij = Lij + param    
                         else
-                            Lij = Lij - param     #Adjust Lij by the value of the inductance of component n
+                            Lij = Lij - param 
                         end
                     end
                 end
             end
             #MUTUAL COUPLING
-            for n in mutualInd
-                eval(Meta.parse("@named M" * string(n[1])*string(n[2]) * "= build_inductance()"))
-                built_components["M" *string(n[1])*string(n[2])] = eval(Meta.parse("M" * string(n[1])*string(n[2]))) 
-                param = eval(Meta.parse("M" * string(n[1])*string(n[2]) * ".sys.L"))
-                if ((i != j) && (i in n) && (j in n)) #If the two currently observed loops are not the same loop and are stated as having mutual inductance
-                    Lij = Lij - param              #Adjust Lij by the value of the mutual inductance
+            for n in mutual_coupling
+                param = eval(Meta.parse("M" * string(n[1])*string(n[2]) * ".L"))
+                if ((i != j) && (i in n) && (j in n)) 
+                    Lij = Lij - param              
                 end
             end
-            push!(current_row, Lij)                      #Lij is pushed to current_row 
+            push!(current_row, Lij)                      
         end 
-        L[j,:] = current_row'                                #current_row is pushed to the L matrix
+        L[j,:] = current_row'                               
     end
-                                 
-    old_sys = []                                            #Array to store system states                                          
-    u0 = Pair{Num, Any}[]                               #Array to store system initial condionts  (Set to 0)
-
-    θcomponents = OrderedDict()                                        #Array to store components with phase differnece θ
-    for comp in built_components                            #Iterate through components to find component  system states and intial conditons
-        push!(old_sys, comp[2].sys)
-        if  !(comp[1][1] in ['L', 'M'])
-            push!(u0, comp[2].sys.θ=>nothing)                   #θ initialised to 0
-            push!(u0, comp[2].sys.i=>0.0)                   #i initialised to 0
-            θcomponents[comp[1]] = comp[2]
-            if (uppercase(comp[1][1]) in ['C', 'J', 'V', 'R'])   
-                push!(u0, D(comp[2].sys.θ)=>0.0)            #D(θ) initialised to 0 for capacitors, JJs and voltage sources
-            end
-        end
-    end
-    for loop in built_loops                                 #Iterate through components to find loop system states
-        push!(old_sys, loop.sys)
-        push!(u0, loop.sys.iₘ=>nothing)                 #iₘ initialised to 0
-    end
-    sys = Vector{ODESystem}(old_sys)                        #Convert system states array to an ODESystem vector form
-
-    #Functions from model_builder.jl to form appropriate equations
-    
-    add_loops!(eqs, built_loops, σA, θcomponents, L)
-    current_flow(eqs, CPD, built_loops, θcomponents)
-    
-    
-    
-
-    @named _model  =  ODESystem(eqs, t)                     #Create an ODESystem with the existing equations
-
-    @named model = compose(_model, sys)                    
-    new_model = mtkcompile(model)                #structural_simplify Algorithm to improve performance
-    return new_model, u0
-                                 #Return structuraly simplified model and initial conditions
 end
+
+
+loops = [["I1", "C1"],
+["C1", "R2"]]
+ext_flux = [false, false]
+
+circuit = process_netlist(loops, ext_flux=ext_flux)
+
+#cirucit model ODAE system and initial condition vector are created.
+model = build_circuit(circuit)
+
