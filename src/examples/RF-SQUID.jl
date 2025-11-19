@@ -8,9 +8,9 @@ using Plots
 
 const jls = JosephsonLoops
 
-#########################################################
+ 
 # 1. Build circuit from netlist
-#########################################################
+ 
 
 loops = [
     ["J1", "L1"],
@@ -28,9 +28,9 @@ circuit = jls.process_netlist(loops; mutual_coupling = coupling, ext_flux = ext_
 model, u0, guesses = jls.build_circuit(circuit)
 sys = model
 
-#########################################################
+ 
 # 2. Fix cyclic/self-referential guesses
-#########################################################
+ 
 
 function sanitize_guesses(guesses, u0)
     g = Dict{Any, Any}()
@@ -54,9 +54,9 @@ end
 
 guesses = sanitize_guesses(guesses, u0)
 
-#########################################################
+
 # 3. Backwards-compatible loop aliases (if needed)
-#########################################################
+ 
 
 try
     if !isdefined(jls, :loop1) && isdefined(jls, :I1)
@@ -78,9 +78,9 @@ catch e
     @warn "Failed to create jls.loop2 alias: $e"
 end
 
-#########################################################
+ 
 # 4. Parameters
-#########################################################
+ 
 
 I₀ = 1.0e-6
 R₀ = 5.0
@@ -105,9 +105,9 @@ ps = [
 
 p_dict = Dict(ps)  # convenient mutable form
 
-#########################################################
+ 
 # 5. Time-domain transient using ODEProblem
-#########################################################
+ 
 
 tspan = (0.0, 1e-6)
 saveat = range(tspan[2] / 10.0, tspan[2], length = 10_000)
@@ -134,9 +134,9 @@ p1 = plot(sol.t, sol[jls.R1.i],
 display(p1)
 # display(p2)  # uncomment if you plot voltage too
 
-#########################################################
+ 
 # 6. Parameter sweep over external flux Φₑ1
-#########################################################
+ 
 
 # For a single external flux on loop 1, JosephsonLoops will usually
 # create a component Φₑ1 with a parameter Φₑ:
@@ -161,9 +161,9 @@ pΦ = plot(Φ_vals ./ Φ₀, R1_final_vs_Φ,
           title = "R1 current vs external flux")
 display(pΦ)
 
-#########################################################
+ 
 # 7. Parameter sweep over drive current I1.I
-#########################################################
+ 
 
 Ispan = (0.0, 2.0 * I₀)
 I_vals = range(Ispan[1], Ispan[2], length = 80)
@@ -184,9 +184,9 @@ pI = plot(I_vals ./ I₀, R1_final_vs_I,
           title = "R1 current vs drive amplitude")
 display(pI)
 
-#########################################################
+ 
 # 8. Harmonic Balance (HB) – RLC-style
-#########################################################
+ 
 
 include("../harmonic balance/colocation HB.jl")
 
