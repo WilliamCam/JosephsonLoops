@@ -1,21 +1,64 @@
+using ModelingToolkit
+using Statistics: mean
+using SymbolicIndexingInterface: parameter_index
+
+const FLUX_QUANTUM = 2.067833848e-15
+
+function _component_system(c)
+    try
+        return getproperty(c, :sys)
+    catch err
+        if err isa ArgumentError
+            return c
+        else
+            rethrow()
+        end
+    end
+end
+
+function _parameter_index(model, sym_or_idx)
+    if sym_or_idx isa ModelingToolkit.ParameterIndex
+        return sym_or_idx
+    end
+    idx = parameter_index(model, sym_or_idx)
+    if idx === nothing
+        error("Parameter $(sym_or_idx) is not part of the provided model.")
+    end
+    return idx
+end
+
+function _build_op_map(model, u0, param_pairs)
+    state_map = Dict{Any,Any}(unknowns(model) .=> 0.0)
+    if all(x -> x isa Pair, u0)
+        for (var, val) in u0
+            state_map[var] = val
+        end
+    elseif !isempty(u0)
+        for (var, val) in zip(unknowns(model), u0)
+            state_map[var] = val
+        end
+    end
+    merge(state_map, Dict(param_pairs))
+end
 
 #transient simulation of whole system
 function tsolve(model, u0, tspan, param_pairs; alg = Rodas5(), kwargs...)      
-    prob = ODEProblem(model, u0, tspan, param_pairs; kwargs...)   #Create an ODEProblem to solve for a specified time
+    prob = ODEProblem(model, _build_op_map(model, u0, param_pairs), tspan; kwargs...)   #Create an ODEProblem to solve for a specified time
     sol = solve(prob, alg)
     return sol                                                  #Return the solved ODEProblem
 end
 
 #Plot a current or voltage of a component (resistor or capacitor)
 function tplot(sol::ODESolution, c; units = "volts")
+    comp = _component_system(c)
     if units == "amps"
-        y = sol[c.sys.i][2:end]
+        y = sol[comp.i][2:end]
         ylabel = "Current (A)"
-        label = string(c.sys.i)
+        label = string(comp.i)
     else
-        y = 1/(sol.t[2]-sol.t[1]) * Φ₀/(2.0*pi) * diff(sol[c.sys.θ])
+        y = 1/(sol.t[2]-sol.t[1]) * FLUX_QUANTUM/(2.0*pi) * diff(sol[comp.I,])
         ylabel = "Voltage  (V)"
-        label = replace(string(c.sys.θ), "θ" => "v")
+        label = replace(string(comp.I,), "I," => "v")
     end
     plot(sol.t[2:end], y, xlabel = "Time (s)", ylabel = ylabel, label = label)
 end
@@ -26,8 +69,12 @@ function ensemble_fsolve(
         NPts = 1000, Ntraj = 100, alg = Rodas5(), units = "volts", kwargs...
     )
     tsaves = LinRange(tspan[1],tspan[2], NPts)
-    ω_vec = 2*pi .* LinRange(fspan[1], fspan[2], Ntraj) 
-    prob = ODEProblem(model, u0, tspan, param_pairs, saveat = tsaves; kwargs...)
+    I_vec = 2*pi .* LinRange(fspan[1], fspan[2], Ntraj) 
+    prob = ODEProblem(model, _build_op_map(model, u0, param_pairs), tspan, saveat = tsaves; kwargs...)
+
+    load_comp = _component_system(load)
+    source_comp = _component_system(source)
+    source_param_idx = _parameter_index(model, source_comp.I)
 
     function RMS(x)
         return sqrt(mean((x .- mean(x)).^2))
@@ -36,13 +83,13 @@ function ensemble_fsolve(
     function RMS_volts(sol,i)
         push!(logger, 1)
         println(string(Ntraj-length(logger)))
-        (RMS(1/(sol.t[2]-sol.t[1])*Φ₀/(2*pi)*diff(sol[load.sys.θ])),false)
+        (RMS(1/(sol.t[2]-sol.t[1])*FLUX_QUANTUM/(2*pi)*diff(sol[load_comp.I,])),false)
     end
 
     function RMS_amps(sol,i)
         push!(logger, 1)
         println(string(Ntraj-length(logger)))
-        (RMS(sol[load.sys.i]),false)
+        (RMS(sol[load_comp.i]),false)
     end
     if units == "volts"
         output_func = RMS_volts
@@ -50,10 +97,10 @@ function ensemble_fsolve(
         output_func = RMS_amps
     end
 
-    ω_index = findfirst(isequal(source.sys.ω), parameters(model))
-    function prob_func(prob, i ,repeat)
-        prob.p[ω_index] = ω_vec[i]
-        prob
+    function prob_func(prob, i, repeat)
+        new_p = copy(prob.p)
+        new_p[source_param_idx] = I_vec[i]
+        return remake(prob; p = new_p)
     end
 
     logger = []
@@ -77,10 +124,12 @@ function ensemble_parameter_sweep(
 
     if DAE == true
         dae_model = dae_index_lowering(model)
-        prob = ODAEProblem(dae_model,  u0, tspan, param_pairs, saveat = tsaves; kwargs...)
+        prob = ODAEProblem(dae_model,  _build_op_map(model, u0, param_pairs), tspan, saveat = tsaves; kwargs...)
     else
-        prob = ODEProblem(model, u0, tspan, param_pairs, saveat = tsaves; kwargs...)
+        prob = ODEProblem(model, _build_op_map(model, u0, param_pairs), tspan, saveat = tsaves; kwargs...)
     end
+
+    load_comp = _component_system(load)
 
     function RMS(x)
         return sqrt(mean((x .- mean(x)).^2))
@@ -89,13 +138,13 @@ function ensemble_parameter_sweep(
     function RMS_volts(sol,i)
         push!(logger, 1)
         println(string(Ntraj-length(logger)))
-        (RMS(1/(sol.t[2]-sol.t[1])*Φ₀/(2*pi)*diff(sol[load.sys.θ])),false)
+        (RMS(1/(sol.t[2]-sol.t[1])*FLUX_QUANTUM/(2*pi)*diff(sol[load_comp.I,])),false)
     end
 
     function RMS_amps(sol,i)
         push!(logger, 1)
         println(string(Ntraj-length(logger)))
-        (RMS(sol[load.sys.i]),false)
+        (RMS(sol[load_comp.i]),false)
     end
     if units == "volts"
         output_func = RMS_volts
@@ -103,10 +152,11 @@ function ensemble_parameter_sweep(
         output_func = RMS_amps
     end
 
-    p_index = findfirst(isequal(parameter), parameters(model))
-    function prob_func(prob, i ,repeat)
-        prob.p[1][p_index] = p_vec[i]
-        prob
+    parameter_idx = _parameter_index(model, parameter)
+    function prob_func(prob, i, repeat)
+        new_p = copy(prob.p)
+        new_p[parameter_idx] = p_vec[i]
+        return remake(prob; p = new_p)
     end
 
     logger = []
@@ -114,11 +164,3 @@ function ensemble_parameter_sweep(
     sol = solve(ensemble_prob,alg, method, trajectories=Ntraj)
     return sol
 end
-
-
-
-
-
-
-    
-
