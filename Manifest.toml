@@ -2,7 +2,7 @@
 
 julia_version = "1.12.1"
 manifest_format = "2.0"
-project_hash = "b84cf16b9caae131a858baf060c9386ed1f34ac7"
+project_hash = "aca4f2aa9ba34d9fe9307f06f07caca3d0e89cd3"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "8be2ae325471fc20b11c27bb34b518541d07dd3a"
@@ -1099,7 +1099,7 @@ uuid = "ae98c720-c025-4a4a-838c-29b094483192"
 version = "0.2.1"
 
 [[deps.JosephsonLoops]]
-deps = ["BifurcationKit", "DataStructures", "DifferentialEquations", "LinearAlgebra", "ModelingToolkit", "Nemo", "Plots", "Profile", "QuestBase", "Statistics", "SymbolicIndexingInterface", "SymbolicUtils", "Symbolics"]
+deps = ["BifurcationKit", "DataStructures", "DifferentialEquations", "LinearAlgebra", "ModelingToolkit", "Nemo", "NonlinearSolve", "Plots", "Profile", "QuestBase", "Statistics", "SymbolicIndexingInterface", "SymbolicUtils", "Symbolics"]
 path = "."
 uuid = "fb07e101-5a60-4408-9312-698af44306dd"
 version = "0.1.0"

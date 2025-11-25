@@ -49,6 +49,19 @@ end
 
 guesses = sanitize_guesses(guesses, u0)
 
+function set_param(pairs, key, val)
+    out = Pair{Num,Float64}[]
+    for (k, v) in pairs
+        if isequal(k, key)
+            push!(out, key => val)
+        else
+            push!(out, k => v)
+        end
+    end
+    return out
+end
+
+
 
 # 3. Create backward-compatible aliases loop1 / loop2
 
@@ -85,9 +98,25 @@ p = [
     jls.J1.R  => 1.0,
     jls.Φₑ2.Φₑ => 0.5,
 ]
+#dc operating point, ac drive turned off
+p_dc= copy(p)
 
+p_dc = set_param(p, jls.I1.I, 0.0)
+
+tspan_dc = (0.0, 5e-6)
+
+
+prob_dc = ODEProblem(
+    sys,
+    merge(Dict(u0), Dict(p_dc)),
+    tspan_dc;
+    guesses = guesses,
+)
+
+sol_dc= solve(prob_dc, Rodas5())
 
 # 5. Time-domain simulation via ODEProblem
+
 
 tspan = (0.0, 1e-6)
 
@@ -105,19 +134,19 @@ plot(sol[jls.C1.i], title = "Transient Time Plot", xlabel = "t", ylabel = "I_C1"
 
 # 7. Ensemble solving example (parameter/noise exploration)
 
-x = jls.ensemble_fsolve(
-    model,
-    u0,
-    tspan,
-    (0.1, 10.0),
-    p,
-    jls.loop1,
-    jls.R1;
-    units  = "amps",
-    Ntraj  = 500,
-)
+# x = jls.ensemble_fsolve(
+#     model,
+#     u0,
+#     tspan,
+#     (0.1, 10.0),
+#     p,
+#     jls.loop1,
+#     jls.R1;
+#     units   "amps",
+#     Ntraj  = 500,
+# )
 
-plot(x.u, title = "Ensemble trajectories")
+# plot(x.u, title = "Ensemble trajectories")
 
 
 # 8. Harmonic Balance setup
@@ -125,36 +154,51 @@ plot(x.u, title = "Ensemble trajectories")
 
 include("../harmonic balance/colocation HB.jl")
 
+# Extract 2nd-order equations and their state variables
 eqs, states = jls.get_full_equations(model, jls.t)
 
+# Build DC values for each state from the DC time-domain solution.
+# `sol_dc[st]` is the time series for that state; take the final value as the DC operating point.
+dc_values = [sol_dc[st][end] for st in states]
+
+# Build harmonic balance system around the DC point.
+# Assumes harmonic_equation(eqs, states, t, ω, N; dc_values=...) is implemented.
+
 harmonic_sys, harmonic_states =
-    jls.harmonic_equation(eqs, states, jls.t, jls.I1.ω, 3)
+    jls.harmonic_equation(eqs, states, jls.t, jls.I1.ω, 3; dc_values = dc_values)
 
 @named ns = NonlinearSystem(harmonic_sys)
-hb_sys = structural_simplify(ns; fully_determined = false, check_consistency = false)
+hb_sys = structural_simplify(ns; fully_determined = true, check_consistency = true)
+
+
+@named ns = NonlinearSystem(harmonic_sys)
+hb_sys = structural_simplify(ns; fully_determined = true, check_consistency = true)
 
 state_syms = collect(unknowns(hb_sys))
 
 
 # 9. Sweep over drive frequency using HB
-
-
+#work in progress/ confused about this section 
 I₀ = 1e-6
 R₀ = 5.0
 Id = 0.05e-6
 ωc = sqrt(2pi * I₀ / (jls.Φ₀ * 1000.0e-15)) / (2pi)
 
-_ = 1 / (2pi * sqrt(1000.0e-12 * 1000.0e-15))  # just to keep the original line
+_ = 1 / (2pi * sqrt(1000.0e-12 * 1000.0e-15))  # keep original line
 
-N = 300
-ω_vec = 2pi * (1:0.1:10) * 1e12   # frequency grid
-solution1 = Float64[]
-solution2 = Float64[]
+# frequency grid (rad/s)
+ω_vec = 2pi * (1:0.1:10) * 1e12
+Nω    = length(ω_vec)
+
+# preallocate responses
+solution1 = zeros(Nω)
+solution2 = zeros(Nω)
 
 # continuation seed: one entry per unknown in HB system
 u0_prev = zeros(length(state_syms))
 
-for drive_freq in ω_vec
+for (i, drive_freq) in enumerate(ω_vec)
+    # parameter set at this drive frequency
     ps = Dict(
         jls.I1.ω  => drive_freq,
         jls.I1.I  => -1e-6,
@@ -165,41 +209,56 @@ for drive_freq in ω_vec
         jls.J1.R  => 1.0,
     )
 
+    # use previous HB solution as initial guess (pseudo-continuation)
     state_guess = isempty(state_syms) ? Dict() : Dict(state_syms .=> u0_prev)
     prob_map    = merge(state_guess, ps)
 
     hb_prob = NonlinearProblem(hb_sys, prob_map;
-                               allow_incomplete = true, check_length = false)
+                               allow_incomplete = true,
+                               check_length     = false)
 
     hb_sol = solve(hb_prob)
 
+    # update continuation seed
     u0_prev .= hb_sol.u
 
-   
-    push!(solution1,
-          hb_sol[ns.A[1]] +
-          sqrt(hb_sol[ns.A[2]]^2 + hb_sol[ns.B[1]]^2) +
-          sqrt(hb_sol[ns.C[2]]^2 + hb_sol[ns.D[1]]^2))
+    #jj curent amp and fundamental phase amp
+    A1 = hb_sol[ns.A_1]
+    B1 = hb_sol[ns.B_1]
+    ampϕ = sqrt(A1^2 + B1^2) 
+
+    I0_val = ps[jls.J1.I0]
+    ampI = I0_val * ampϕ 
+    solution1[i]   = ampϕ
+    solution2[i] = ampI
 end
 
+freqs = collect(ω_vec) ./ (2pi)
 
-# 10. Reflection / S-parameter style plot
+# sanity checks
+@show length(freqs)
+@show length(solution1)
+@show length(solution2)
 
+# phase amplitude vs frequency
+plot(
+    freqs, solution1;
+    xlabel = "Frequency (Hz)",
+    ylabel = "Phase amplitude (rad)",
+    title  = "JJ phase response (fundamental)",
+    label  = "phase amplitude",
+    lw     = 2,
+)
 
-# Use Φ₀ from the module if available, otherwise fall back
-Φ₀_val = isdefined(jls, :Φ₀) ? jls.Φ₀ : 2.067833848e-15
-
-Ii = @. Id - Φ₀_val / (2pi) * ω_vec * solution1 / 50.0
-Vi = @. Φ₀_val / (2pi) * ω_vec * solution1
-
-ai = 0.5 * (Vi + 50 * Ii) / 50
-bi = 0.5 * (Vi - 50 * conj.(Ii)) / 50
-
-# plot(ω_vec ./ (2pi), 10 * log10.(abs2.(ai ./ bi)),
-#      xlabel = "Frequency (Hz)", ylabel = "Return (dB)",
-#      title = "HB reflection")
-
-
+# overlay current amplitude on a new figure (or the same, up to you)
+plot(
+    freqs, solution2;
+    xlabel = "Frequency (Hz)",
+    ylabel = "Current amplitude (A)",
+    title  = "JJ current response (approx.)",
+    label  = "current amplitude",
+    lw     = 2,
+)
 
 
 
@@ -251,4 +310,3 @@ bi = 0.5 * (Vi - 50 * conj.(Ii)) / 50
 
 # bf = bifurcationdiagram(bprob, PALC(), 2, opts_br)
 # --- final display section ---
-
