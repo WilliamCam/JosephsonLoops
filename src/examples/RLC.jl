@@ -1,11 +1,13 @@
-# In this example we model a parallel RLC circuit driven by a voltage source
+# In this example e model a parallel RLC circuit driven by a voltage source
 
 using JosephsonLoops
 using ModelingToolkit
 using Symbolics
 using DifferentialEquations
 using Plots
-using BifurcationKit
+using NonlinearSolve
+
+
 
 const jls = JosephsonLoops
 #build circuit
@@ -13,6 +15,7 @@ loops = [
     ["I1", "R1"],
     ["R1", "C1", "J1"],
 ]
+
 
 ext_flux = [true, true]
 
@@ -90,7 +93,7 @@ end
 
 p = [
     jls.I1.ω  => 100e6 * 2pi,
-    jls.I1.I  => 1e-12,
+    jls.I1.I  => 1e-4,
     jls.C1.C  => 100.0e-15,
     jls.J1.C  => 1000.0e-15,
     jls.J1.I0 => 1e-6,
@@ -98,22 +101,7 @@ p = [
     jls.J1.R  => 1.0,
     jls.Φₑ2.Φₑ => 0.5,
 ]
-#dc operating point, ac drive turned off
-p_dc= copy(p)
 
-p_dc = set_param(p, jls.I1.I, 0.0)
-
-tspan_dc = (0.0, 5e-6)
-
-
-prob_dc = ODEProblem(
-    sys,
-    merge(Dict(u0), Dict(p_dc)),
-    tspan_dc;
-    guesses = guesses,
-)
-
-sol_dc= solve(prob_dc, Rodas5())
 
 # 5. Time-domain simulation via ODEProblem
 
@@ -149,117 +137,168 @@ plot(sol[jls.C1.i], title = "Transient Time Plot", xlabel = "t", ylabel = "I_C1"
 # plot(x.u, title = "Ensemble trajectories")
 
 
-# 8. Harmonic Balance setup
+# 8. Harmonic Balance setup (DC via algebraic steady state, no time integration)
 
 
 include("../harmonic balance/colocation HB.jl")
 
-# Extract 2nd-order equations and their state variables
+# second-order equations and their state variables
 eqs, states = jls.get_full_equations(model, jls.t)
 
-# Build DC values for each state from the DC time-domain solution.
-# `sol_dc[st]` is the time series for that state; take the final value as the DC operating point.
-dc_values = [sol_dc[st][end] for st in states]
+# Build a DC system by forcing all time derivatives to zero:
+D  = Differential(jls.t)
+dc_eqs = eqs
+for st in states
+    dc_eqs = substitute(dc_eqs, Dict(
+        D(D(st)) => 0,   # d²x/dt² = 0
+        D(st)    => 0,   # dx/dt   = 0
+    ))
+end
 
-# Build harmonic balance system around the DC point.
-# Assumes harmonic_equation(eqs, states, t, ω, N; dc_values=...) is implemented.
+# Nonlinear algebraic system: dc_eqs(states, params) = 0
+@named dc_ns = NonlinearSystem(dc_eqs, states, parameters(model))
 
-harmonic_sys, harmonic_states =
-    jls.harmonic_equation(eqs, states, jls.t, jls.I1.ω, 3; dc_values = dc_values)
+dc_sys = structural_simplify(dc_ns;
+    fully_determined = true,
+    check_consistency = false,
+)
+dc_state_syms = collect(unknowns(dc_sys))
 
-@named ns = NonlinearSystem(harmonic_sys)
-hb_sys = structural_simplify(ns; fully_determined = true, check_consistency = true)
+# 9. Sweep over drive frequency using DC → HB at each step
 
-
-@named ns = NonlinearSystem(harmonic_sys)
-hb_sys = structural_simplify(ns; fully_determined = true, check_consistency = true)
-
-state_syms = collect(unknowns(hb_sys))
-
-
-# 9. Sweep over drive frequency using HB
-#work in progress/ confused about this section 
-I₀ = 1e-6
+I₀ = 1e-4
 R₀ = 5.0
 Id = 0.05e-6
 ωc = sqrt(2pi * I₀ / (jls.Φ₀ * 1000.0e-15)) / (2pi)
 
 _ = 1 / (2pi * sqrt(1000.0e-12 * 1000.0e-15))  # keep original line
 
-# frequency grid (rad/s)
-ω_vec = 2pi * (1:0.1:10) * 1e12
+# frequency grid: 1–20 GHz (linear here; change to log/whatever if you like)
+freqs = range(1e9, 20e9; length = 50)   # Hz
+ω_vec = 2pi .* freqs                        # rad/s
 Nω    = length(ω_vec)
 
-# preallocate responses
-solution1 = zeros(Nω)
-solution2 = zeros(Nω)
+solution1 = zeros(Nω)   # phase amplitude
+solution2 = zeros(Nω)   # current amplitude
 
-# continuation seed: one entry per unknown in HB system
-u0_prev = zeros(length(state_syms))
+# continuation seeds for DC and HB
+dc_guess = zeros(length(dc_state_syms))   # initial guess for DC solve
+hb_guess = nothing                 # we’ll set this after first HB solve
 
-for (i, drive_freq) in enumerate(ω_vec)
-    # parameter set at this drive frequency
-    ps = Dict(
-        jls.I1.ω  => drive_freq,
-        jls.I1.I  => -1e-6,
+
+
+for (i, ωd) in enumerate(ω_vec)
+    # DC solve at this frequency: AC drive OFF (I1.I = 0)
+    ps_dc = Dict(
+        jls.I1.ω  => ωd,          # might drop out of DC eqs, but fine
+        jls.I1.I  => 0.0,         # NO AC drive for DC operating point
         jls.C1.C  => 100.0e-15,
         jls.J1.C  => 1000.0e-15,
         jls.J1.I0 => 1e-6,
         jls.R1.R  => 50.0,
         jls.J1.R  => 1.0,
+        jls.Φₑ2.Φₑ => 0.5,
     )
 
-    # use previous HB solution as initial guess (pseudo-continuation)
-    state_guess = isempty(state_syms) ? Dict() : Dict(state_syms .=> u0_prev)
-    prob_map    = merge(state_guess, ps)
+    dc_state_guess = isempty(dc_state_syms) ? Dict() : Dict(dc_state_syms .=> dc_guess)
+    dc_prob = NonlinearProblem(dc_sys, merge(dc_state_guess, ps_dc, Dict(jls.t => 0.0)))
+    dc_sol  = solve(dc_prob)
 
-    hb_prob = NonlinearProblem(hb_sys, prob_map;
-                               allow_incomplete = true,
+    # 
+    dc_guess .= dc_sol.u
+
+    
+    dc_values = Float64[]
+    for st in states
+        val = try
+            dc_sol[st]
+        catch
+            try
+                dc_sol[ModelingToolkit.observed(dc_sys, st)]
+            catch
+                0.0
+            end
+        end
+        push!(dc_values, float(val))
+    end
+
+    #  build HB system around this DC point, with AC drive ON ---
+    ps_hb = Dict(
+        jls.I1.ω  => ωd,
+        jls.I1.I  =>-1e-6,       # AC drive amplitude
+        jls.C1.C  => 100.0e-15,
+        jls.J1.C  => 1000.0e-15,
+        jls.J1.I0 => 1e-6,
+        jls.R1.R  => 50.0,
+        jls.J1.R  => 1.0,
+        jls.Φₑ2.Φₑ => 0.5,
+    )
+
+    Nh = 3  # number of harmonics
+    harmonic_sys, harmonic_states =
+        jls.harmonic_equation(eqs, states, jls.t, jls.I1.ω, Nh;
+                              dc_values = dc_values)
+
+    @named hb_ns = NonlinearSystem(harmonic_sys) 
+    hb_ns = structural_simplify(hb_ns;
+                                      fully_determined = true,
+                                      check_consistency = true)
+
+    state_syms = collect(unknowns(hb_ns))
+
+    # continuation guess for HB:
+    if hb_guess === nothing
+        hb_guess = zeros(length(state_syms))
+    end
+
+    hb_guess_dict = Dict(state_syms .=> hb_guess)
+    prob_map      = merge(hb_guess_dict, ps_hb)
+
+    hb_prob = NonlinearProblem(hb_ns, prob_map;
+                               allow_incomplete = false,
                                check_length     = false)
 
     hb_sol = solve(hb_prob)
 
-    # update continuation seed
-    u0_prev .= hb_sol.u
+    hb_guess .= hb_sol.u  # update HB continuation seed
 
-    #jj curent amp and fundamental phase amp
-    A1 = hb_sol[ns.A_1]
-    B1 = hb_sol[ns.B_1]
-    ampϕ = sqrt(A1^2 + B1^2) 
+    # extract JJ phase & current amplitudes from fundamental 
+    A1 = hb_sol[hb_ns.A_1]
+    B1 = hb_sol[hb_ns.B_1]
+    ampϕ = sqrt(A1^2 + B1^2)      # fundamental phase amplitude
 
-    I0_val = ps[jls.J1.I0]
-    ampI = I0_val * ampϕ 
-    solution1[i]   = ampϕ
+    I0_val = ps_hb[jls.J1.I0]
+    ampI   = I0_val * ampϕ        # crude current amplitude estimate
+
+    solution1[i] = ampϕ
     solution2[i] = ampI
 end
+# frequency axis in GHz for plotting
+freqs_GHz = freqs ./ 1e9
 
-freqs = collect(ω_vec) ./ (2pi)
-
-# sanity checks
-@show length(freqs)
+@show length(freqs_GHz)
 @show length(solution1)
 @show length(solution2)
 
 # phase amplitude vs frequency
 plot(
-    freqs, solution1;
-    xlabel = "Frequency (Hz)",
+    freqs_GHz, solution1;
+    xlabel = "Frequency (GHz)",
     ylabel = "Phase amplitude (rad)",
     title  = "JJ phase response (fundamental)",
     label  = "phase amplitude",
     lw     = 2,
 )
 
-# overlay current amplitude on a new figure (or the same, up to you)
+# current amplitude vs frequency
 plot(
-    freqs, solution2;
-    xlabel = "Frequency (Hz)",
+    freqs_GHz, solution2;
+    xlabel = "Frequency (GHz)",
     ylabel = "Current amplitude (A)",
     title  = "JJ current response (approx.)",
     label  = "current amplitude",
     lw     = 2,
 )
-
 
 
 
