@@ -164,3 +164,38 @@ function ensemble_parameter_sweep(
     sol = solve(ensemble_prob,alg, method, trajectories=Ntraj)
     return sol
 end
+
+function sanitize_guesses(guesses, u0)
+    u0_dict = u0 isa AbstractDict ? u0 : Dict(u0)
+    g = Dict{Any, Any}()
+    for (k, v) in guesses
+        try
+            # if the guess maps a variable to itself (or is identical), replace it with a numeric guess
+            if v === k || v == k
+                if haskey(u0_dict, k)
+                    g[k] = float(u0_dict[k])
+                else
+                    g[k] = 0.0
+                end
+            else
+                g[k] = v
+            end
+        catch
+            # if comparison fails for some symbolic type, fallback to the original value
+            g[k] = v
+        end
+    end
+    return g
+end
+
+function set_param(pairs, key, val)
+    out = Pair{Num,Float64}[]
+    for (k, v) in pairs
+        if isequal(k, key)
+            push!(out, key => val)
+        else
+            push!(out, k => v)
+        end
+    end
+    return out
+end

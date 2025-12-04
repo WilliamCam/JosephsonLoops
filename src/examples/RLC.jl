@@ -1,4 +1,4 @@
-# In this example e model a parallel RLC circuit driven by a voltage source
+# Example: Coupled Josephson circuit with mutual inductance and HB
 
 using JosephsonLoops
 using ModelingToolkit
@@ -6,68 +6,38 @@ using Symbolics
 using DifferentialEquations
 using Plots
 using NonlinearSolve
-
-
+using LinearAlgebra
 
 const jls = JosephsonLoops
-#build circuit
+
+ 
+# 1. Build circuit from netlist
+ 
+
 loops = [
-    ["I1", "R1"],
-    ["R1", "C1", "J1"],
+    ["J1", "L1"],
+    ["L2", "C1"],
+    ["C1", "R1"],
+    ["R1", "I1"],
 ]
 
+coupling = [(1, 2)]
+ext_flux = [true, false, false, false]
 
-ext_flux = [true, true]
-
-circuit = jls.process_netlist(loops; ext_flux = ext_flux)
+circuit = jls.process_netlist(loops; mutual_coupling = coupling, ext_flux = ext_flux)
 
 # circuit model ODAE system and initial condition vector are created.
 model, u0, guesses = jls.build_circuit(circuit)
 sys = model
 
+ 
 # 2. Fix cyclic/self-referential guesses
+ 
+guesses = jls.sanitize_guesses(guesses, u0)
 
 
-function sanitize_guesses(guesses, u0)
-    g = Dict{Any, Any}()
-    for (k, v) in guesses
-        try
-            # if the guess maps a variable to itself (or is identical), replace it with a numeric guess
-            if v === k || v == k
-                if haskey(u0, k)
-                    g[k] = float(u0[k])
-                else
-                    g[k] = 0.0
-                end
-            else
-                g[k] = v
-            end
-        catch
-            # if comparison fails for some symbolic type, fallback to the original value
-            g[k] = v
-        end
-    end
-    return g
-end
-
-guesses = sanitize_guesses(guesses, u0)
-
-function set_param(pairs, key, val)
-    out = Pair{Num,Float64}[]
-    for (k, v) in pairs
-        if isequal(k, key)
-            push!(out, key => val)
-        else
-            push!(out, k => v)
-        end
-    end
-    return out
-end
-
-
-
-# 3. Create backward-compatible aliases loop1 / loop2
-
+# 3. Backwards-compatible loop aliases (if needed)
+ 
 
 try
     if !isdefined(jls, :loop1) && isdefined(jls, :I1)
@@ -89,263 +59,194 @@ catch e
     @warn "Failed to create jls.loop2 alias: $e"
 end
 
-# 4. Set parameter values
+ 
+# 4. Parameters
+ 
 
-p = [
-    jls.I1.ω  => 100e6 * 2pi,
-    jls.I1.I  => 1e-4,
-    jls.C1.C  => 100.0e-15,
-    jls.J1.C  => 1000.0e-15,
-    jls.J1.I0 => 1e-6,
+I₀ = 1.0e-6
+R₀ = 5.0
+Φ₀ = jls.Φ₀
+
+βc  = 2π / Φ₀ * I₀ * R₀^2
+βL  = 2π / Φ₀ * I₀
+fdrive = 100e6
+
+ps = [
+    jls.I1.ω  => 2π * fdrive,
+    jls.I1.I  => 1.0 * I₀,
+    jls.J1.I0 => I₀,
+    jls.J1.R  => R₀,
+    jls.J1.C  => 0.01 / βc,
     jls.R1.R  => 50.0,
-    jls.J1.R  => 1.0,
-    jls.Φₑ2.Φₑ => 0.5,
+    jls.C1.C  => 2.0 / βc,
+    jls.L1.L  => 2.0 / βc,
+    jls.L2.L  => 100.0 / βL,
+    jls.M12.L => 8.0 / βL,
 ]
 
+p_dict = Dict(ps)  # convenient mutable form
 
-# 5. Time-domain simulation via ODEProblem
-
+ 
+# 5. Time-domain transient using ODEProblem
+ 
 
 tspan = (0.0, 1e-6)
+saveat = range(tspan[2] / 10.0, tspan[2], length = 10_000)
+
+# Fix for unstable transient: Initialize with zeros
+u0_zero = Dict(unknowns(sys) .=> 0.0)
 
 prob = ODEProblem(
     sys,
-    merge(Dict(u0), Dict(p)),
+    merge(u0_zero, p_dict),
     tspan;
     guesses = guesses,
 )
 
-sol = solve(prob, Rodas5())
+sol = solve(prob, Rodas5(); saveat = saveat)
 
-plot(sol[jls.C1.i], title = "Transient Time Plot", xlabel = "t", ylabel = "I_C1")
+# Example transient plots (currents/voltages on R1)
+p1 = plot(sol.t, sol[jls.R1.i],
+          xlabel = "t (s)", ylabel = "I_R1 (A)",
+          title = "R1 current (transient)")
+savefig(p1, "rf_squid_transient.png")
 
+ 
+# 6. Parameter sweep over external flux Φₑ1
+ 
 
-# 7. Ensemble solving example (parameter/noise exploration)
+# For a single external flux on loop 1, JosephsonLoops will usually
+# create a component Φₑ1 with a parameter Φₑ:
+Φ_param = jls.Φₑ1.Φₑ
 
-# x = jls.ensemble_fsolve(
-#     model,
-#     u0,
-#     tspan,
-#     (0.1, 10.0),
-#     p,
-#     jls.loop1,
-#     jls.R1;
-#     units   "amps",
-#     Ntraj  = 500,
-# )
+Φspan = (0.0, 2.0 * Φ₀)
+Φ_vals = range(Φspan[1], Φspan[2], length = 80)
 
-# plot(x.u, title = "Ensemble trajectories")
+R1_final_vs_Φ = Float64[]
 
-
-# 8. Harmonic Balance setup (DC via algebraic steady state, no time integration)
-
-
-include("../harmonic balance/colocation HB.jl")
-
-# second-order equations and their state variables
-eqs, states = jls.get_full_equations(model, jls.t)
-
-# Build a DC system by forcing all time derivatives to zero:
-D  = Differential(jls.t)
-dc_eqs = eqs
-for st in states
-    dc_eqs = substitute(dc_eqs, Dict(
-        D(D(st)) => 0,   # d²x/dt² = 0
-        D(st)    => 0,   # dx/dt   = 0
-    ))
+for Φ in Φ_vals
+    pΦ = copy(p_dict)
+    pΦ[Φ_param] = Φ
+    probΦ = ODEProblem(sys, merge(u0_zero, pΦ), tspan; guesses = guesses)
+    solΦ = solve(probΦ, Rodas5(); saveat = saveat)
+    push!(R1_final_vs_Φ, solΦ[jls.R1.i][end])  # R1 current at final time
 end
 
-# Nonlinear algebraic system: dc_eqs(states, params) = 0
-@named dc_ns = NonlinearSystem(dc_eqs, states, parameters(model))
+pΦ = plot(Φ_vals ./ Φ₀, R1_final_vs_Φ,
+          xlabel = "Φₑ1 / Φ₀",
+          ylabel = "I_R1(t_end) (A)",
+          title = "R1 current vs external flux")
+savefig(pΦ, "rf_squid_flux_sweep.png")
 
-dc_sys = structural_simplify(dc_ns;
-    fully_determined = true,
-    check_consistency = false,
-)
-dc_state_syms = collect(unknowns(dc_sys))
+ 
+# 7. Parameter sweep over drive current I1.I
+ 
 
-# 9. Sweep over drive frequency using DC → HB at each step
+Ispan = (0.0, 2.0 * I₀)
+I_vals = range(Ispan[1], Ispan[2], length = 80)
 
-I₀ = 1e-4
-R₀ = 5.0
-Id = 0.05e-6
-ωc = sqrt(2pi * I₀ / (jls.Φ₀ * 1000.0e-15)) / (2pi)
+R1_final_vs_I = Float64[]
 
-_ = 1 / (2pi * sqrt(1000.0e-12 * 1000.0e-15))  # keep original line
+for Id in I_vals
+    pI = copy(p_dict)
+    pI[jls.I1.I] = Id
+    probI = ODEProblem(sys, merge(u0_zero, pI), tspan; guesses = guesses)
+    solI = solve(probI, Rodas5(); saveat = saveat)
+    push!(R1_final_vs_I, solI[jls.R1.i][end])
+end
 
-# frequency grid: 1–20 GHz (linear here; change to log/whatever if you like)
-freqs = range(1e9, 20e9; length = 50)   # Hz
-ω_vec = 2pi .* freqs                        # rad/s
-Nω    = length(ω_vec)
+pI = plot(I_vals ./ I₀, R1_final_vs_I,
+          xlabel = "I_drive / I₀",
+          ylabel = "I_R1(t_end) (A)",
+          title = "R1 current vs drive amplitude")
+savefig(pI, "rf_squid_drive_sweep.png")
 
-solution1 = zeros(Nω)   # phase amplitude
-solution2 = zeros(Nω)   # current amplitude
+ 
+# 8. Harmonic Balance (HB) – RLC-style
+ 
 
-# continuation seeds for DC and HB
-dc_guess = zeros(length(dc_state_syms))   # initial guess for DC solve
-hb_guess = nothing                 # we’ll set this after first HB solve
+eqs, states = jls.get_full_equations(model, jls.t)
 
+Nharmonics = 3
+harmonic_sys, harmonic_states =
+    jls.harmonic_equation(eqs, states, jls.t, jls.I1.ω, Nharmonics)
 
+@named ns = NonlinearSystem(harmonic_sys)
 
-for (i, ωd) in enumerate(ω_vec)
-    # DC solve at this frequency: AC drive OFF (I1.I = 0)
-    ps_dc = Dict(
-        jls.I1.ω  => ωd,          # might drop out of DC eqs, but fine
-        jls.I1.I  => 0.0,         # NO AC drive for DC operating point
-        jls.C1.C  => 100.0e-15,
-        jls.J1.C  => 1000.0e-15,
-        jls.J1.I0 => 1e-6,
+hb_sys = structural_simplify(ns;
+                              fully_determined = false,
+                              check_consistency = false)
+
+state_syms = collect(unknowns(hb_sys))
+
+N = 300
+ω_vec = range(0.8, 1.2, length = N) .* (2π * fdrive)
+solution = Float64[]
+
+u0_prev = zeros(length(state_syms))
+
+# Identify which coefficients correspond to the variable we want to plot (e.g., current/phase of interest)
+# The states order is determined by `get_full_equations`.
+# Usually, we want the magnitude of the fundamental harmonic.
+# Let's assume we want to plot the amplitude of the first harmonic for the first state variable.
+# In `colocation HB.jl`, coefficients are labeled A, B for state 1; C, D for state 2, etc.
+# A_1, B_1 are fundamental cosine and sine coeffs for state 1.
+
+# Find the variables in `ns` (A_1, B_1)
+A1_sym = nothing
+B1_sym = nothing
+
+# Attempt to find A_1 and B_1 dynamically
+for s in state_syms
+    sname = string(s)
+    if contains(sname, "A_1")
+        global A1_sym = s
+    elseif contains(sname, "B_1")
+        global B1_sym = s
+    end
+end
+
+for ω in ω_vec
+    psHB = Dict(
+        jls.I1.ω  => ω,
+        jls.I1.I  => 0.6 * I₀,
+        jls.J1.I0 => I₀,
+        jls.J1.R  => R₀,
+        jls.J1.C  => 0.01 / βc,
         jls.R1.R  => 50.0,
-        jls.J1.R  => 1.0,
-        jls.Φₑ2.Φₑ => 0.5,
+        jls.C1.C  => 2.0 / βc,
+        jls.L1.L  => 2.0 / βc,
+        jls.L2.L  => 100.0 / βL,
+        jls.M12.L => 8.0 / βL,
+        Φ_param   => 0.5 * Φ₀,   # bias flux
     )
 
-    dc_state_guess = isempty(dc_state_syms) ? Dict() : Dict(dc_state_syms .=> dc_guess)
-    dc_prob = NonlinearProblem(dc_sys, merge(dc_state_guess, ps_dc, Dict(jls.t => 0.0)))
-    dc_sol  = solve(dc_prob)
+    state_guess = isempty(state_syms) ? Dict() : Dict(state_syms .=> u0_prev)
+    prob_map    = merge(state_guess, psHB)
 
-    # 
-    dc_guess .= dc_sol.u
-
-    
-    dc_values = Float64[]
-    for st in states
-        val = try
-            dc_sol[st]
-        catch
-            try
-                dc_sol[ModelingToolkit.observed(dc_sys, st)]
-            catch
-                0.0
-            end
-        end
-        push!(dc_values, float(val))
-    end
-
-    #  build HB system around this DC point, with AC drive ON ---
-    ps_hb = Dict(
-        jls.I1.ω  => ωd,
-        jls.I1.I  =>-1e-6,       # AC drive amplitude
-        jls.C1.C  => 100.0e-15,
-        jls.J1.C  => 1000.0e-15,
-        jls.J1.I0 => 1e-6,
-        jls.R1.R  => 50.0,
-        jls.J1.R  => 1.0,
-        jls.Φₑ2.Φₑ => 0.5,
-    )
-
-    Nh = 3  # number of harmonics
-    harmonic_sys, harmonic_states =
-        jls.harmonic_equation(eqs, states, jls.t, jls.I1.ω, Nh;
-                              dc_values = dc_values)
-
-    @named hb_ns = NonlinearSystem(harmonic_sys) 
-    hb_ns = structural_simplify(hb_ns;
-                                      fully_determined = true,
-                                      check_consistency = true)
-
-    state_syms = collect(unknowns(hb_ns))
-
-    # continuation guess for HB:
-    if hb_guess === nothing
-        hb_guess = zeros(length(state_syms))
-    end
-
-    hb_guess_dict = Dict(state_syms .=> hb_guess)
-    prob_map      = merge(hb_guess_dict, ps_hb)
-
-    hb_prob = NonlinearProblem(hb_ns, prob_map;
-                               allow_incomplete = false,
-                               check_length     = false)
+    hb_prob = NonlinearProblem(hb_sys, prob_map;
+                               allow_incomplete = true,
+                               check_length = false)
 
     hb_sol = solve(hb_prob)
 
-    hb_guess .= hb_sol.u  # update HB continuation seed
+    u0_prev .= hb_sol.u
 
-    # extract JJ phase & current amplitudes from fundamental 
-    A1 = hb_sol[hb_ns.A_1]
-    B1 = hb_sol[hb_ns.B_1]
-    ampϕ = sqrt(A1^2 + B1^2)      # fundamental phase amplitude
-
-    I0_val = ps_hb[jls.J1.I0]
-    ampI   = I0_val * ampϕ        # crude current amplitude estimate
-
-    solution1[i] = ampϕ
-    solution2[i] = ampI
+    # Calculate amplitude sqrt(A_1^2 + B_1^2) if symbols found, else 0.0
+    val = 0.0
+    if A1_sym !== nothing && B1_sym !== nothing
+        val = sqrt(hb_sol[A1_sym]^2 + hb_sol[B1_sym]^2)
+    elseif length(hb_sol.u) > 0
+         # Fallback: just magnitude of some state if specific vars not found (unlikely)
+         val = norm(hb_sol.u) 
+    end
+    
+    push!(solution, val)
 end
-# frequency axis in GHz for plotting
-freqs_GHz = freqs ./ 1e9
 
-@show length(freqs_GHz)
-@show length(solution1)
-@show length(solution2)
-
-# phase amplitude vs frequency
-plot(
-    freqs_GHz, solution1;
-    xlabel = "Frequency (GHz)",
-    ylabel = "Phase amplitude (rad)",
-    title  = "JJ phase response (fundamental)",
-    label  = "phase amplitude",
-    lw     = 2,
-)
-
-# current amplitude vs frequency
-plot(
-    freqs_GHz, solution2;
-    xlabel = "Frequency (GHz)",
-    ylabel = "Current amplitude (A)",
-    title  = "JJ current response (approx.)",
-    label  = "current amplitude",
-    lw     = 2,
-)
-
-
-
-
-# # 11. Bifurcation analysis with BifurcationKit
-
-# # Choose continuation parameter (drive frequency)
-
-
-# # Parameter vector for starting point: use original jls symbols,
-# # *not* sys.I1.I etc., because hb_sys does not expose those as fields.
-# bif_par = jls.loop1.ω
-# p_start = [
-#     jls.loop1.ω => ω_vec[1]
-#     jls.loop1.I => Id
-#     jls.C1.C    => 100.0e-15
-#     jls.J1.C    => 1000.0e-15
-#     jls.J1.I0   => 0.3e-6
-#     jls.R1.R    => 50.0
-#     jls.J1.R    => 1000.0
-#     jls.loop2.Φₑ => 0.0
-# ]
-
-
-# # Use the last HB solution as initial guess for continuation
-# u0_guess = copy(u0_prev)
-
-# # Pick an observable for plotting along the branch.
-# # We just use the second unknown here; adjust if you want a specific state.
-# plot_var = state_syms[2]
-
-# bprob = BifurcationProblem(
-#     hb_sys,
-#     u0_guess,
-#     p_start,
-#     bif_par;
-#     plot_var = plot_var,
-#     jac = false,
-# )
-
-# p_span = (ω_vec[1], ω_vec[end])
-
-# opts_br = ContinuationPar(
-#     nev   = 2,
-#     p_min = p_span[1],
-#     p_max = p_span[2],
-# )
-
-# bf = bifurcationdiagram(bprob, PALC(), 2, opts_br)
-# --- final display section ---
+pHB = plot(ω_vec ./ (2π),
+           solution,
+           xlabel = "Frequency (Hz)",
+           ylabel = "Amplitude (arb.)",
+           title = "HB response of coupled Josephson circuit")
+savefig(pHB, "rf_squid_hb.png")

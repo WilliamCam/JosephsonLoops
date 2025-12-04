@@ -5,6 +5,7 @@ using ModelingToolkit
 using Symbolics
 using DifferentialEquations
 using Plots
+using NonlinearSolve
 
 const jls = JosephsonLoops
 
@@ -31,28 +32,7 @@ sys = model
  
 # 2. Fix cyclic/self-referential guesses
  
-
-function sanitize_guesses(guesses, u0)
-    g = Dict{Any, Any}()
-    for (k, v) in guesses
-        try
-            if v === k || v == k
-                if haskey(u0, k)
-                    g[k] = float(u0[k])
-                else
-                    g[k] = 0.0
-                end
-            else
-                g[k] = v
-            end
-        catch
-            g[k] = v
-        end
-    end
-    return g
-end
-
-guesses = sanitize_guesses(guesses, u0)
+guesses = jls.sanitize_guesses(guesses, u0)
 
 
 # 3. Backwards-compatible loop aliases (if needed)
@@ -112,9 +92,12 @@ p_dict = Dict(ps)  # convenient mutable form
 tspan = (0.0, 1e-6)
 saveat = range(tspan[2] / 10.0, tspan[2], length = 10_000)
 
+# Fix for unstable transient: Initialize with zeros
+u0_zero = Dict(k => 0.0 for k in keys(u0))
+
 prob = ODEProblem(
     sys,
-    merge(Dict(u0), p_dict),
+    merge(u0_zero, p_dict),
     tspan;
     guesses = guesses,
 )
@@ -125,14 +108,7 @@ sol = solve(prob, Rodas5(); saveat = saveat)
 p1 = plot(sol.t, sol[jls.R1.i],
           xlabel = "t (s)", ylabel = "I_R1 (A)",
           title = "R1 current (transient)")
-
-# If your R1 has a voltage variable, you can also do:
-# p2 = plot(sol.t, sol[jls.R1.v],
-#           xlabel = "t (s)", ylabel = "V_R1 (V)",
-#           title = "R1 voltage (transient)")
-
-display(p1)
-# display(p2)  # uncomment if you plot voltage too
+savefig(p1, "rf_squid_transient.png")
 
  
 # 6. Parameter sweep over external flux Φₑ1
@@ -150,7 +126,7 @@ R1_final_vs_Φ = Float64[]
 for Φ in Φ_vals
     pΦ = copy(p_dict)
     pΦ[Φ_param] = Φ
-    probΦ = ODEProblem(sys, merge(Dict(u0), pΦ), tspan; guesses = guesses)
+    probΦ = ODEProblem(sys, merge(u0_zero, pΦ), tspan; guesses = guesses)
     solΦ = solve(probΦ, Rodas5(); saveat = saveat)
     push!(R1_final_vs_Φ, solΦ[jls.R1.i][end])  # R1 current at final time
 end
@@ -159,7 +135,7 @@ pΦ = plot(Φ_vals ./ Φ₀, R1_final_vs_Φ,
           xlabel = "Φₑ1 / Φ₀",
           ylabel = "I_R1(t_end) (A)",
           title = "R1 current vs external flux")
-display(pΦ)
+savefig(pΦ, "rf_squid_flux_sweep.png")
 
  
 # 7. Parameter sweep over drive current I1.I
@@ -173,7 +149,7 @@ R1_final_vs_I = Float64[]
 for Id in I_vals
     pI = copy(p_dict)
     pI[jls.I1.I] = Id
-    probI = ODEProblem(sys, merge(Dict(u0), pI), tspan; guesses = guesses)
+    probI = ODEProblem(sys, merge(u0_zero, pI), tspan; guesses = guesses)
     solI = solve(probI, Rodas5(); saveat = saveat)
     push!(R1_final_vs_I, solI[jls.R1.i][end])
 end
@@ -182,13 +158,11 @@ pI = plot(I_vals ./ I₀, R1_final_vs_I,
           xlabel = "I_drive / I₀",
           ylabel = "I_R1(t_end) (A)",
           title = "R1 current vs drive amplitude")
-display(pI)
+savefig(pI, "rf_squid_drive_sweep.png")
 
  
 # 8. Harmonic Balance (HB) – RLC-style
  
-
-include("../harmonic balance/colocation HB.jl")
 
 eqs, states = jls.get_full_equations(model, jls.t)
 
@@ -209,6 +183,27 @@ N = 300
 solution = Float64[]
 
 u0_prev = zeros(length(state_syms))
+
+# Identify which coefficients correspond to the variable we want to plot (e.g., current/phase of interest)
+# The states order is determined by `get_full_equations`.
+# Usually, we want the magnitude of the fundamental harmonic.
+# Let's assume we want to plot the amplitude of the first harmonic for the first state variable.
+# In `colocation HB.jl`, coefficients are labeled A, B for state 1; C, D for state 2, etc.
+# A_1, B_1 are fundamental cosine and sine coeffs for state 1.
+
+# Find the variables in `ns` (A_1, B_1)
+A1_sym = nothing
+B1_sym = nothing
+
+# Attempt to find A_1 and B_1 dynamically
+for s in state_syms
+    sname = string(s)
+    if sname == "A_1"
+        global A1_sym = s
+    elseif sname == "B_1"
+        global B1_sym = s
+    end
+end
 
 for ω in ω_vec
     psHB = Dict(
@@ -236,11 +231,16 @@ for ω in ω_vec
 
     u0_prev .= hb_sol.u
 
-    # This combination is what you had originally;
-    # assumes ns.E and ns.F exist in the HB system.
-    push!(solution,
-          hb_sol[ns.E[1]] +
-          sqrt(hb_sol[ns.E[3]]^2 + hb_sol[ns.F[1]]^2))
+    # Calculate amplitude sqrt(A_1^2 + B_1^2) if symbols found, else 0.0
+    val = 0.0
+    if A1_sym !== nothing && B1_sym !== nothing
+        val = sqrt(hb_sol[A1_sym]^2 + hb_sol[B1_sym]^2)
+    elseif length(hb_sol.u) > 0
+         # Fallback: just magnitude of some state if specific vars not found (unlikely)
+         val = norm(hb_sol.u) 
+    end
+    
+    push!(solution, val)
 end
 
 pHB = plot(ω_vec ./ (2π),
@@ -248,8 +248,7 @@ pHB = plot(ω_vec ./ (2π),
            xlabel = "Frequency (Hz)",
            ylabel = "Amplitude (arb.)",
            title = "HB response of coupled Josephson circuit")
-display(pHB)
-
+savefig(pHB, "rf_squid_hb.png")
 
 # bif_par = jls.loop4.sys.ω
 # p_start = [
