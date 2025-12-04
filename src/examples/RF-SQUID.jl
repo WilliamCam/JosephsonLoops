@@ -1,17 +1,25 @@
+# In this example we model a DC SQUID driven by a current source
+
+#Load JLoop package
 using JosephsonLoops 
 const jls = JosephsonLoops
 
+### Write Netlist
+#Define componeents in each loop
 loops = [
-["J1","L1"],
+["J1"],
 ["L2","C1"],
 ["C1","R1"],
 ["R1","I1"]]
 
 coupling = [(1,2)]
-ext_flux = [true, false, false, false]
-circuit = jls.process_netlist(loops, mutual_coupling = coupling, ext_flux = ext_flux)
 
-model, x = jls.build_circuit(circuit)  
+circuit = jls.process_netlist(loops, mutualInd = coupling)
+
+#cirucit model ODAE system and initial condition vector are created.
+model, u0 = jls.build_circuit(circuit)
+
+# we set the values of circuit parameters, for any parameters not specified; default values will be assigned.
 
 I₀ = 1.0e-6
 R₀ = 5.0
@@ -19,19 +27,20 @@ R₀ = 5.0
 
 βc  = 2*pi/Φ₀ * I₀ * R₀^2
 βL = 2*pi/Φ₀ * I₀
-fdrive = 100e6
+fd = 100e6
 
 ps = [
-    jls.I1.ω => 2*pi*fdrive
-    jls.I1.I => 1.0*I₀
-    jls.J1.I0 => I₀
-    jls.J1.R => R₀
-    jls.J1.C => 0.01/βc
-    jls.R1.R => 50.0
-    jls.C1.C => 2.0/βc
-    jls.L1.L => 2.0/βc
-    jls.L2.L => 100.0/βL
-    jls.M12.L => 8.0/βL
+    jls.loop4.sys.ω => 2*pi*fd
+    jls.loop4.sys.I => 1.0*I₀
+    jls.J1.sys.I0 => I₀
+    jls.J1.sys.R => R₀
+    jls.J1.sys.C => 0.01/βc
+    jls.J1.sys.L => 2.0/βL
+    jls.R1.sys.R => 50.0
+    jls.C1.sys.C => 2.0/βc
+    jls.L2.sys.L => 100.0/βL
+    jls.M12.sys.L => 8.0/βL
+    jls.loop1.sys.Φₑ => 0.5*Φ₀
 
 ]
 
@@ -58,7 +67,7 @@ using ModelingToolkit
 eqs, states = jls.get_full_equations(model, jls.t)
 
 Nharmonics = 3
-harmonic_sys, harmonic_states = jls.harmonic_equation(eqs, states, jls.t, jls.I1.ω, 3)
+harmonic_sys, harmonic_states = jls.harmonic_equation(eqs, states, jls.t, jls.loop4.sys.ω, 3)
 
 
 @named ns = NonlinearSystem(harmonic_sys)
@@ -66,24 +75,23 @@ harmonic_sys, harmonic_states = jls.harmonic_equation(eqs, states, jls.t, jls.I1
 sys = structural_simplify(ns)
 
 N = 300
-ω_vec = range(0.8,1.2,N)*2*pi*fdrive
+ω_vec = range(0.8,1.2,N)*2*pi*fd
 solution=[]
 
 for i in 1:1:N
     ps = [
-    jls.I1.ω => ω_vec[i]
-    jls.I1.I => 0.6*I₀
-    jls.J1.I0 => I₀
-    jls.J1.R => R₀
-    jls.J1.C => 0.01/βc
-    jls.R1.R => 50.0
-    jls.C1.C => 2.0/βc
-    jls.L1.L => 2.0/βc
-    jls.L2.L => 100.0/βL
-    jls.M12.L => 8.0/βL
-    jls.Φₑ1.Φₑ => 0.5*Φ₀
-    ]
-    prob = NonlinearProblem(sys,zeros(19), ps)
+    jls.loop4.sys.ω => ω_vec[i]
+    jls.loop4.sys.I => 1.0*I₀
+    jls.J1.sys.I0 => I₀
+    jls.J1.sys.R => R₀
+    jls.J1.sys.C => 0.01/βc
+    jls.J1.sys.L => 2.0/βL
+    jls.R1.sys.R => 50.0
+    jls.C1.sys.C => 2.0/βc
+    jls.L2.sys.L => 100.0/βL
+    jls.M12.sys.L => 8.0/βL
+    jls.loop1.sys.Φₑ => 0.5*Φ₀]
+    prob = NonlinearProblem(sys,zeros(2*Nharmonics+1), ps)
     sol = solve(prob)
     push!(solution,  sol[ns.E[1]] + sqrt(sol[ns.E[3]]^2+sol[ns.F[1]]^2))
 end
