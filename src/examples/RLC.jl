@@ -28,19 +28,14 @@ model, u0 = jls.build_circuit(circuit)
         jls.J1.sys.R => 1.0
         jls.loop2.sys.Φₑ => 0.0
     ]
+using DifferentialEquations
 
 #specify transient window for solver
 tspan = (0.0, 1e-6)
-using DifferentialEquations, ModelingToolkit
+using DifferentialEquations
 # Create dictionary of initial conditions
-u0_zero = Dict(unknowns(model) .=> 0.0)
-
-#u0 = Dict(u => 0.0 for u in unknowns(model))
-prob = ODEProblem(model, merge(u0_zero,Dict(ps)), tspan, guesses=guesses)
-sol = solve(prob, Rodas5())
-using Plots
-plot(sol[jls.C1.i])
-
+u0 = Dict(u => 0.0 for u in unknowns(model))
+prob = DAEProblem(model, u0, tspan, ps)
 #transient circuit analysis
 sol = jls.tsolve(model, u0, tspan, ps, alg = Rodas5())
 jls.tplot(sol, jls.R1, units = "amps")
