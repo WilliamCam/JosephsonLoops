@@ -7,7 +7,7 @@ function tsolve(model, u0, tspan, param_pairs; alg = Rodas5(), kwargs...)
 end
 
 #Plot a current or voltage of a component (resistor or capacitor)
-function tplot(sol::ODESolution, c; units = "volts")
+function tplot(sol::ODESolution, c::Component; units = "volts")
     if units == "amps"
         y = sol[c.sys.i][2:end]
         ylabel = "Current (A)"
@@ -22,7 +22,7 @@ end
 
 #solve for the frequency response of some load component when subject to an AC source, by performing an ensemble of transient simulations
 function ensemble_fsolve(
-        model::ODESystem, u0, tspan, fspan, param_pairs, source,  load; 
+        model::ODESystem, u0, tspan, fspan, param_pairs, source,  load::Component; 
         NPts = 1000, Ntraj = 100, alg = Rodas5(), units = "volts", kwargs...
     )
     tsaves = LinRange(tspan[1],tspan[2], NPts)
@@ -63,7 +63,7 @@ function ensemble_fsolve(
 end
 
 function ensemble_parameter_sweep(
-    model::ODESystem, u0, tspan, pspan, param_pairs, parameter,  load; 
+    model::ODESystem, u0, tspan, pspan, param_pairs, parameter,  load::Component; 
     NPts = 1000, Ntraj = 100, alg = Rodas5(), units = "volts", Parallel = false, DAE = false, kwargs...
     )
     tsaves = LinRange(tspan[1],tspan[2], NPts)

@@ -27,16 +27,15 @@ model, u0, guesses = jls.build_circuit(circuit)
         jls.J1.R => 1.0
         jls.Φₑ2.Φₑ => 0.5
     ]
-using DifferentialEquations
 
 #specify transient window for solver
 tspan = (0.0, 1e-6)
-using DifferentialEquations
+using DifferentialEquations, ModelingToolkit
 # Create dictionary of initial conditions
-
+u0_zero = Dict(unknowns(model) .=> 0.0)
 
 #u0 = Dict(u => 0.0 for u in unknowns(model))
-prob = ODEProblem(model, u0, tspan, ps, guesses=guesses)
+prob = ODEProblem(model, merge(u0_zero,Dict(ps)), tspan, guesses=guesses)
 sol = solve(prob, Rodas5())
 using Plots
 plot(sol[jls.C1.i])
