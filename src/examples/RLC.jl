@@ -31,10 +31,9 @@ using DifferentialEquations
 
 #specify transient window for solver
 tspan = (0.0, 1e-6)
-using DifferentialEquations
+using DifferentialEquations, ModelingToolkit
 # Create dictionary of initial conditions
-u0 = Dict(u => 0.0 for u in unknowns(model))
-prob = DAEProblem(model, u0, tspan, ps)
+prob = DAEProblem(model, merge(Dict(u0),Dict(ps)), tspan, guesses=guesses)
 #transient circuit analysis
 sol = jls.tsolve(model, [] tspan, ps, alg = Rodas5())
 jls.tplot(sol, jls.C1, units = "amps")
