@@ -67,30 +67,19 @@ eqs = [0~NL_eq1
 
 @named ns = NonlinearSystem(eqs)
 
-initial_guesses = Dict(
-    A1 => 1.0,
-    A2 => 0.0,
-    B1 => 1.0,
-    B2 => 0.0,
-)
+guesses = [A1=>1.0, A2=>0.0, B1=>1.0, B2=>0.0]
 
 ps = [α => 1., ω0 => 1.0, F => 0.01, η => 0.1, ω=>1.1]
 
 sys = structural_simplify(ns)
-state_syms = collect(unknowns(sys))
-u0_prev = isempty(state_syms) ? Float64[] : [get(initial_guesses, s, 0.0) for s in state_syms]
 
 ω_vec = range(0.9,1.2,100)
 solution=[]
 
 for i in 1:1:100
-    ps = Dict(α => 0.02, ω0 => 1.0, F => 0.01, η => 0.1, ω=> ω_vec[i])
-    state_guess = isempty(state_syms) ? Dict() : Dict(state_syms .=> u0_prev)
-    prob = NonlinearProblem(sys, merge(state_guess, ps))
+    ps = [α => 0.02, ω0 => 1.0, F => 0.01, η => 0.1, ω=> ω_vec[i]]
+    prob = NonlinearProblem(sys, guesses, ps)
     sol = solve(prob)
-    if !isempty(u0_prev)
-        u0_prev .= sol.u
-    end
     push!(solution, sqrt(sol.u[1]^2+sol.u[3]^2))
 end
 
