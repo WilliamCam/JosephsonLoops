@@ -1,4 +1,4 @@
-# Example: Coupled Josephson circuit with mutual inductance and HB
+# In this example e model a parallel RLC circuit driven by a voltage source
 
 using JosephsonLoops
 using ModelingToolkit
@@ -6,38 +6,34 @@ using Symbolics
 using DifferentialEquations
 using Plots
 using NonlinearSolve
-using LinearAlgebra
+
+
+
 
 const jls = JosephsonLoops
-
- 
-# 1. Build circuit from netlist
- 
-
+#build circuit
 loops = [
-    ["J1", "L1"],
-    ["L2", "C1"],
-    ["C1", "R1"],
-    ["R1", "I1"],
+    ["I1", "R1"],
+    ["R1", "C1", "J1"],
 ]
 
-coupling = [(1, 2)]
-ext_flux = [true, false, false, false]
 
-circuit = jls.process_netlist(loops; mutual_coupling = coupling, ext_flux = ext_flux)
+ext_flux = [true, true]
+
+circuit = jls.process_netlist(loops; ext_flux = ext_flux)
 
 # circuit model ODAE system and initial condition vector are created.
 model, u0, guesses = jls.build_circuit(circuit)
 sys = model
 
- 
 # 2. Fix cyclic/self-referential guesses
- 
+
 guesses = jls.sanitize_guesses(guesses, u0)
 
 
-# 3. Backwards-compatible loop aliases (if needed)
- 
+
+# 3. Create backward-compatible aliases loop1 / loop2
+
 
 try
     if !isdefined(jls, :loop1) && isdefined(jls, :I1)
@@ -59,194 +55,160 @@ catch e
     @warn "Failed to create jls.loop2 alias: $e"
 end
 
- 
-# 4. Parameters
- 
-
-I₀ = 1.0e-6
-R₀ = 5.0
-Φ₀ = jls.Φ₀
-
-βc  = 2π / Φ₀ * I₀ * R₀^2
-βL  = 2π / Φ₀ * I₀
-fdrive = 100e6
-
-ps = [
-    jls.I1.ω  => 2π * fdrive,
-    jls.I1.I  => 1.0 * I₀,
-    jls.J1.I0 => I₀,
-    jls.J1.R  => R₀,
-    jls.J1.C  => 0.01 / βc,
-    jls.R1.R  => 50.0,
-    jls.C1.C  => 2.0 / βc,
-    jls.L1.L  => 2.0 / βc,
-    jls.L2.L  => 100.0 / βL,
-    jls.M12.L => 8.0 / βL,
+# 4. Set parameter values
+p = [
+    jls.I1.ω  => 2pi * 8.3e9,
+    jls.I1.I  => 10e-9,      # Reduced to 10 nA for small signal linear response
+    jls.C1.C  => 100.0e-15,
+    jls.J1.C  => 1000.0e-15,
+    jls.J1.I0 => 1e-6,
+    jls.R1.R  => 500.0,      # Increased to 500 Ohm for higher Q
+    jls.J1.R  => 10000.0,    # Increased to 10 kOhm to remove internal damping
+    jls.Φₑ2.Φₑ => 0.5,
 ]
 
-p_dict = Dict(ps)  # convenient mutable form
 
- 
-# 5. Time-domain transient using ODEProblem
- 
+# 5. Time-domain simulation via ODEProblem
+
 
 tspan = (0.0, 1e-6)
-saveat = range(tspan[2] / 10.0, tspan[2], length = 10_000)
-
-# Fix for unstable transient: Initialize with zeros
-u0_zero = Dict(unknowns(sys) .=> 0.0)
 
 prob = ODEProblem(
     sys,
-    merge(u0_zero, p_dict),
+    merge(Dict(u0), Dict(p)),
     tspan;
     guesses = guesses,
 )
 
-sol = solve(prob, Rodas5(); saveat = saveat)
+sol = solve(prob, Rodas5())
 
-# Example transient plots (currents/voltages on R1)
-p1 = plot(sol.t, sol[jls.R1.i],
-          xlabel = "t (s)", ylabel = "I_R1 (A)",
-          title = "R1 current (transient)")
-savefig(p1, "rf_squid_transient.png")
+p1 = plot(sol[jls.C1.i], title = "Transient Time Plot", xlabel = "t", ylabel = "I_C1")
+savefig(p1, "transient_plot.png")
+p_dc = jls.set_param(p, jls.I1.I, 0.0)
 
- 
-# 6. Parameter sweep over external flux Φₑ1
- 
+tspan_dc = (0.0, 5e-6)
 
-# For a single external flux on loop 1, JosephsonLoops will usually
-# create a component Φₑ1 with a parameter Φₑ:
-Φ_param = jls.Φₑ1.Φₑ
 
-Φspan = (0.0, 2.0 * Φ₀)
-Φ_vals = range(Φspan[1], Φspan[2], length = 80)
+prob_dc = ODEProblem(
+    sys,
+    merge(Dict(u0), Dict(p_dc)),
+    tspan_dc;
+    guesses = guesses,
+)
 
-R1_final_vs_Φ = Float64[]
+sol_dc= solve(prob_dc, Rodas5())
 
-for Φ in Φ_vals
-    pΦ = copy(p_dict)
-    pΦ[Φ_param] = Φ
-    probΦ = ODEProblem(sys, merge(u0_zero, pΦ), tspan; guesses = guesses)
-    solΦ = solve(probΦ, Rodas5(); saveat = saveat)
-    push!(R1_final_vs_Φ, solΦ[jls.R1.i][end])  # R1 current at final time
-end
 
-pΦ = plot(Φ_vals ./ Φ₀, R1_final_vs_Φ,
-          xlabel = "Φₑ1 / Φ₀",
-          ylabel = "I_R1(t_end) (A)",
-          title = "R1 current vs external flux")
-savefig(pΦ, "rf_squid_flux_sweep.png")
+# 7. Ensemble solving example (parameter/noise exploration)
+# Removed commented out code.
 
- 
-# 7. Parameter sweep over drive current I1.I
- 
 
-Ispan = (0.0, 2.0 * I₀)
-I_vals = range(Ispan[1], Ispan[2], length = 80)
 
-R1_final_vs_I = Float64[]
+# 8. Harmonic Balance setup
 
-for Id in I_vals
-    pI = copy(p_dict)
-    pI[jls.I1.I] = Id
-    probI = ODEProblem(sys, merge(u0_zero, pI), tspan; guesses = guesses)
-    solI = solve(probI, Rodas5(); saveat = saveat)
-    push!(R1_final_vs_I, solI[jls.R1.i][end])
-end
 
-pI = plot(I_vals ./ I₀, R1_final_vs_I,
-          xlabel = "I_drive / I₀",
-          ylabel = "I_R1(t_end) (A)",
-          title = "R1 current vs drive amplitude")
-savefig(pI, "rf_squid_drive_sweep.png")
+include("../harmonic balance/colocation HB.jl")
 
- 
-# 8. Harmonic Balance (HB) – RLC-style
- 
-
+# Extract 2nd-order equations and their state variables
 eqs, states = jls.get_full_equations(model, jls.t)
 
-Nharmonics = 3
+# Build DC values for each state from the DC time-domain solution.
+# `sol_dc[st]` is the time series for that state; take the final value as the DC operating point.
+dc_values = [sol_dc[st][end] for st in states]
+
+# Build harmonic balance system around the DC point.
+# Assumes harmonic_equation(eqs, states, t, ω, N; dc_values=...) is implemented.
+
 harmonic_sys, harmonic_states =
-    jls.harmonic_equation(eqs, states, jls.t, jls.I1.ω, Nharmonics)
+    jls.harmonic_equation(eqs, states, jls.t, jls.I1.ω, 3; dc_values = dc_values)
 
 @named ns = NonlinearSystem(harmonic_sys)
-
-hb_sys = structural_simplify(ns;
-                              fully_determined = false,
-                              check_consistency = false)
+hb_sys = structural_simplify(ns; fully_determined = true, check_consistency = true)
 
 state_syms = collect(unknowns(hb_sys))
 
-N = 300
-ω_vec = range(0.8, 1.2, length = N) .* (2π * fdrive)
-solution = Float64[]
 
+# 9. Sweep over drive frequency using HB
+#work in progress/ confused about this section 
+I₀ = 1e-6
+R₀ = 5.0
+Id = 0.05e-6
+ωc = sqrt(2pi * I₀ / (jls.Φ₀ * 1000.0e-15)) / (2pi)
+
+_ = 1 / (2pi * sqrt(1000.0e-12 * 1000.0e-15))  # keep original line
+
+# frequency grid (rad/s)
+# Resonant frequency approx 8.3 GHz. Scanning 1-15 GHz.
+ω_vec = 2pi * (1:0.2:15) * 1e9
+Nω    = length(ω_vec)
+
+# preallocate responses
+solution1 = zeros(Nω)
+solution2 = zeros(Nω)
+solution_gain = zeros(Nω)
+
+# continuation seed: one entry per unknown in HB system
 u0_prev = zeros(length(state_syms))
 
-# Identify which coefficients correspond to the variable we want to plot (e.g., current/phase of interest)
-# The states order is determined by `get_full_equations`.
-# Usually, we want the magnitude of the fundamental harmonic.
-# Let's assume we want to plot the amplitude of the first harmonic for the first state variable.
-# In `colocation HB.jl`, coefficients are labeled A, B for state 1; C, D for state 2, etc.
-# A_1, B_1 are fundamental cosine and sine coeffs for state 1.
+for (i, drive_freq) in enumerate(ω_vec)
+    # parameter set at this drive frequency
+    ps = merge(Dict(p), Dict(
+        jls.I1.ω  => drive_freq,
+        jls.I1.I  => 10e-9,      # Match the small signal drive
+        jls.J1.R  => 10000.0,    # High internal resistance
+    ))
 
-# Find the variables in `ns` (A_1, B_1)
-A1_sym = nothing
-B1_sym = nothing
-
-# Attempt to find A_1 and B_1 dynamically
-for s in state_syms
-    sname = string(s)
-    if contains(sname, "A_1")
-        global A1_sym = s
-    elseif contains(sname, "B_1")
-        global B1_sym = s
-    end
-end
-
-for ω in ω_vec
-    psHB = Dict(
-        jls.I1.ω  => ω,
-        jls.I1.I  => 0.6 * I₀,
-        jls.J1.I0 => I₀,
-        jls.J1.R  => R₀,
-        jls.J1.C  => 0.01 / βc,
-        jls.R1.R  => 50.0,
-        jls.C1.C  => 2.0 / βc,
-        jls.L1.L  => 2.0 / βc,
-        jls.L2.L  => 100.0 / βL,
-        jls.M12.L => 8.0 / βL,
-        Φ_param   => 0.5 * Φ₀,   # bias flux
-    )
-
+    # use previous HB solution as initial guess (pseudo-continuation)
     state_guess = isempty(state_syms) ? Dict() : Dict(state_syms .=> u0_prev)
-    prob_map    = merge(state_guess, psHB)
+    prob_map    = merge(state_guess, ps)
 
     hb_prob = NonlinearProblem(hb_sys, prob_map;
                                allow_incomplete = true,
-                               check_length = false)
+                               check_length     = false)
 
     hb_sol = solve(hb_prob)
 
+    # update continuation seed
     u0_prev .= hb_sol.u
 
-    # Calculate amplitude sqrt(A_1^2 + B_1^2) if symbols found, else 0.0
-    val = 0.0
-    if A1_sym !== nothing && B1_sym !== nothing
-        val = sqrt(hb_sol[A1_sym]^2 + hb_sol[B1_sym]^2)
-    elseif length(hb_sol.u) > 0
-         # Fallback: just magnitude of some state if specific vars not found (unlikely)
-         val = norm(hb_sol.u) 
-    end
-    
-    push!(solution, val)
+    #jj curent amp and fundamental phase amp
+    A1 = hb_sol[ns.A_1]
+    B1 = hb_sol[ns.B_1]
+    ampϕ = sqrt(A1^2 + B1^2) 
+
+    I0_val = ps[jls.J1.I0]
+    ampI = I0_val * ampϕ 
+    solution1[i]   = ampϕ
+    solution2[i] = ampI
+
 end
 
-pHB = plot(ω_vec ./ (2π),
-           solution,
-           xlabel = "Frequency (Hz)",
-           ylabel = "Amplitude (arb.)",
-           title = "HB response of coupled Josephson circuit")
-savefig(pHB, "rf_squid_hb.png")
+freqs = collect(ω_vec) ./ (2pi)
+
+# sanity checks
+@show length(freqs)
+@show length(solution1)
+@show length(solution2)
+
+# phase amplitude vs frequency
+p2 = plot(
+    freqs, solution1;
+    xlabel = "Frequency (Hz)",
+    ylabel = "Phase amplitude (rad)",
+    title  = "JJ phase response (fundamental)",
+    label  = "phase amplitude",
+    lw     = 2,
+)
+savefig(p2, "frequency_response_phase.png")
+
+# overlay current amplitude on a new figure (or the same, up to you)
+p3 = plot(
+    freqs, solution2;
+    xlabel = "Frequency (Hz)",
+    ylabel = "Current amplitude (A)",
+    title  = "JJ current response (approx.)",
+    label  = "current amplitude",
+    lw     = 2,
+)
+savefig(p3, "frequency_response_current.png")
+
