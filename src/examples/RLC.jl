@@ -58,12 +58,12 @@ end
 # 4. Set parameter values
 p = [
     jls.I1.ω  => 2pi * 8.3e9,
-    jls.I1.I  => 10e-9,      # Reduced to 10 nA for small signal linear response
+    jls.I1.I  => 0.5e-6,      # Reduced to 10 nA for small signal linear response
     jls.C1.C  => 100.0e-15,
     jls.J1.C  => 1000.0e-15,
     jls.J1.I0 => 1e-6,
-    jls.R1.R  => 500.0,      # Increased to 500 Ohm for higher Q
-    jls.J1.R  => 10000.0,    # Increased to 10 kOhm to remove internal damping
+    jls.R1.R  => 50.0,      # Increased to 50 Ohm for higher Q
+    jls.J1.R  => 50.0,    # Increased to 10 kOhm to remove internal damping
     jls.Φₑ2.Φₑ => 0.5,
 ]
 
@@ -82,7 +82,7 @@ prob = ODEProblem(
 
 sol = solve(prob, Rodas5())
 
-p1 = plot(sol[jls.C1.i], title = "Transient Time Plot", xlabel = "t", ylabel = "I_C1")
+p1 = plot(sol[jls.C1.i][end-400:end], title = "Transient Time Plot", xlabel = "t", ylabel = "I_C1")
 savefig(p1, "transient_plot.png")
 p_dc = jls.set_param(p, jls.I1.I, 0.0)
 
@@ -177,7 +177,7 @@ for (i, drive_freq) in enumerate(ω_vec)
     ampϕ = sqrt(A1^2 + B1^2) 
 
     I0_val = ps[jls.J1.I0]
-    ampI = I0_val * ampϕ 
+    ampI = I0_val * ampϕ #need to take derivative of this, find current whats flowing through components
     solution1[i]   = ampϕ
     solution2[i] = ampI
 
