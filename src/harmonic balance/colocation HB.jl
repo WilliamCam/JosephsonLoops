@@ -109,7 +109,7 @@ function harmonic_equation(eqs, states, tvar, wvar, N)
             push!(harmonic_system, res_at_coll ~ 0)
         end
     end
-    @mtkcompile ns = NonlinearSystem(harmonic_sys)
+    @mtkcompile ns = NonlinearSystem(harmonic_system)
     return ns, X
 end
 

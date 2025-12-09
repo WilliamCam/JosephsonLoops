@@ -5,11 +5,10 @@ using JosephsonLoops
 const jls = JosephsonLoops
 
 loops = [
-["I1", "R1"],
-["R1", "C1", "J1"]
+["P1", "C1", "J1"]
 ]
 
-ext_flux = [true, true]
+ext_flux = [true]
 
 
 circuit = jls.process_netlist(loops, ext_flux=ext_flux)
@@ -18,8 +17,8 @@ circuit = jls.process_netlist(loops, ext_flux=ext_flux)
 model, u0, guesses = jls.build_circuit(circuit)
 # we set the values of circuit parameters, for any parameters not specified; default values will be assigned.
     ps = [
-        jls.I1.ω => 100e6*2*pi
-        jls.I1.I => 1e-12
+        jls.P1.ω => 100e6*2*pi
+        jls.P1.I => 1e-12
         jls.C1.C => 100.0e-15
         jls.J1.C=> 1000.0e-15
         jls.J1.I0 => 1e-6
@@ -59,8 +58,8 @@ plot(x.u)
 include("../harmonic balance/colocation HB.jl")
 eqs, states = jls.get_full_equations(model, jls.t)
 
-harmonic_sys, harmonic_states = jls.harmonic_equation(eqs, states, jls.t, jls.I1.ω, 3)
-ns, harmonic_states = harmonic_equation(eqs, states, jls.t, jls.I1.ω, 3)
+harmonic_sys, harmonic_states = harmonic_equation(eqs, states, jls.t, jls.I1.ω, 3)
+ns, harmonic_states = jls.harmonic_equation(eqs, states, jls.t, jls.I1.ω, 3)
 
 @named ns = NonlinearSystem(harmonic_sys)
 sys =  ModelingToolkit.complete(structural_simplify(ns, fully_determined = false))

@@ -13,10 +13,10 @@ Processes a circuit netlist defined by loops and creates a `CircuitNetlist` stru
 - `CircuitNetlist`: A `CircuitNetlist` object that encapsulates the processed information, including loops, mutual coupling, external flux, component mappings, and identified branches.
 
 # Example
-```julia
+
 loops = [["R1", "C1"], ["I1", "R1"], ["J1", "L1"]]
 circuit = process_netlist(loops; mutual_coupling=[(1, 2)], ext_flux=[1])
-```
+
 """
 struct CircuitNetlist
     loops::Vector{Vector{String}}
@@ -37,7 +37,7 @@ function find_components(loops::Vector{Vector{String}})
     end
 
     for comp in keys(component_loop_mapping)
-        if (comp[1] in ['I', 'R', 'C', 'J', 'L'])
+        if (comp[1] in ['I', 'R', 'C', 'J', 'L', 'P'])
             push!(branches, comp)
         end
     end
@@ -90,11 +90,10 @@ Constructs a ModelingToolkit ODESystem from a CircuitNetlist by creating and con
 - Composes final system from component equations and connections
 
 # Example
-```julia
+
 loops = [["R1", "C1"], ["I1", "R1"]]
 circuit = process_netlist(loops)
 model = build_circuit(circuit)
-```
 
 # Throws
 - `ArgumentError`: If an unrecognized component type is found in the netlist
@@ -135,6 +134,11 @@ function build_circuit(circuit::CircuitNetlist)
             built_components[j] = new_c
         elseif (j[1] == 'L')                                
             new_c = "@named $j = Inductor()"
+            new_c = Meta.parse(new_c)
+            new_c = eval(new_c)
+            built_components[j] = new_c
+        elseif (j[1] == 'P')                                
+            new_c = "@named $j = Port()"
             new_c = Meta.parse(new_c)
             new_c = eval(new_c)
             built_components[j] = new_c
@@ -204,9 +208,13 @@ function build_circuit(circuit::CircuitNetlist)
     push!(ground_loop_connectables, g_sys.g)
     push!(eqs, connect(ground_loop_connectables...))
     
-    sys = [x[2] for x in built_components]
+    sys = [component[2] for component in built_components]
     @named _model = System(eqs, t)
-    @named model = compose(_model,sys)                    
+    @named model = compose(_model,sys)
+    #TODO: Make calling Dict more readable i.e. c[2]
+    print(built_components)
+
+
     new_model = mtkcompile(model)
 
     guesses = Pair{Num,Float64}[]
@@ -221,49 +229,14 @@ end
 
 
 
-#depreciated
-function construct_L_matrix(loops, component_loop_mapping, mutual_coupling)
-    ### Construction inductance matrix. Not strictly necessary and depreciated
-    L = zeros(Num, numLoops, numLoops)
-    for j in 1:numLoops                                        
-        current_row = []
-        for i in 1:numLoops                                    
-            Lij = 0                                          
-            #SELF COUPLING
-            for n in loops[i]                                  
-                if ((n[1] == 'L'))
-                    if (j-1 in get(component_loop_mapping, n, -1))   
-                        if (n[1] == 'L')
-                            param = eval(Meta.parse(n*".L"))     
-                        end
-                        if (i == j)
-                            Lij = Lij + param    
-                        else
-                            Lij = Lij - param 
-                        end
-                    end
-                end
-            end
-            #MUTUAL COUPLING
-            for n in mutual_coupling
-                param = eval(Meta.parse("M" * string(n[1])*string(n[2]) * ".L"))
-                if ((i != j) && (i in n) && (j in n)) 
-                    Lij = Lij - param              
-                end
-            end
-            push!(current_row, Lij)                      
-        end 
-        L[j,:] = current_row'                               
-    end
-end
 
 
-loops = [["I1", "C1"],
-["C1", "R2"]]
-ext_flux = [false, false]
+# loops = [["I1", "C1"],
+# ["C1", "R2"]]
+# ext_flux = [false, false]
 
-circuit = process_netlist(loops, ext_flux=ext_flux)
+# circuit = process_netlist(loops, ext_flux=ext_flux)
 
-#cirucit model ODAE system and initial condition vector are created.
-model = build_circuit(circuit)
+# #cirucit model ODAE system and initial condition vector are created.
+# model = build_circuit(circuit)
 
