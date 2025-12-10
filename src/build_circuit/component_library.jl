@@ -131,7 +131,7 @@ end
     end
     @variables begin
         i(t), [irreducible=true]
-        θ(t), [irreducible=true]
+        dθ(t), [irreducible=true]
     end
     @equations begin
         [
@@ -139,7 +139,7 @@ end
             connect(Isrc.in, in)
             connect(Rsrc.out, out)
             i ~ Rsrc.i
-            θ ~ Rsrc.θ
+            dθ ~ D(Rsrc.θ)
         ]
     end
 end

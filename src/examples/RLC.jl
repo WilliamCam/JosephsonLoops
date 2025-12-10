@@ -15,6 +15,8 @@ circuit = jls.process_netlist(loops, ext_flux=ext_flux)
 
 #cirucit model ODAE system and initial condition vector are created.
 model, u0, guesses = jls.build_circuit(circuit)
+
+
 # we set the values of circuit parameters, for any parameters not specified; default values will be assigned.
     ps = [
         jls.P1.ω => 100e6*2*pi
@@ -22,31 +24,26 @@ model, u0, guesses = jls.build_circuit(circuit)
         jls.C1.C => 100.0e-15
         jls.J1.C=> 1000.0e-15
         jls.J1.I0 => 1e-6
-        jls.R1.R => 50.0
         jls.J1.R => 1.0
-        jls.Φₑ2.Φₑ => 0.5
+        jls.Φₑ1.Φₑ => 0.0
     ]
-using DifferentialEquations
 
 #specify transient window for solver
 tspan = (0.0, 1e-6)
-using DifferentialEquations, ModelingToolkit
-# Create dictionary of initial conditions
-prob = DAEProblem(model, merge(Dict(u0),Dict(ps)), tspan, guesses=guesses)
 #transient circuit analysis
-sol = jls.tsolve(model, [] tspan, ps, alg = Rodas5())
+sol = jls.tsolve(model,u0, ps, tspan, guesses=guesses)
 jls.tplot(sol, jls.C1, units = "amps")
 
 # we can pass any arguments known to the problem interface of DifferentialEquations.jl, to achieve better results
-
 #saveat force the integrator to step at certain time points
-saveat = LinRange(10.0, 100.0, 1000)
+saveat = LinRange(0.0, 1e-6, 1000)
 
 #specify a different solving algorithim
 alg = Rodas5()
 
-@time sol = scsim.tsolve(model, u_initial, tspan, ps; saveat = saveat, alg = alg, abstol = 1e-6)
-scsim.tplot(sol, scsim.R1, units = "amps")
+sol = jls.tsolve(model, u0, ps, tspan;
+    guesses=guesses, saveat = saveat, solver_opts = alg, abstol = 1e-6)
+jls.tplot(sol, jls.C1, units = "amps")
 
 x = scsim.ensemble_fsolve(model, u0, tspan, (0.1, 10.0), ps, scsim.loop1, scsim.R1, units = "amps", Ntraj = 500)   
 

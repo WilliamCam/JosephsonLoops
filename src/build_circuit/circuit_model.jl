@@ -161,6 +161,7 @@ function build_circuit(circuit::CircuitNetlist)
     eqs=Equation[]
     ground_loop_connectables = []
     for i in 1:length(loops)
+        #TODO: assert that ports are always grounded
         connectables = []
         for component_name in keys(component_loop_mapping)
             if i-1 in component_loop_mapping[component_name]
@@ -221,7 +222,8 @@ function build_circuit(circuit::CircuitNetlist)
     u0 = Pair{Num,Float64}[]
     for state_var in unknowns(new_model)
         push!(guesses, state_var => 0.0)
-        push!(u0, D(state_var) => 0.0)
+        #TODO: Addition of ports creates initialization
+        #push!(u0, D(state_var) => 0.0)
     end
 
     return new_model, u0, guesses                             
