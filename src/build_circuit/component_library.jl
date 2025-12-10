@@ -2,9 +2,15 @@ using ModelingToolkit, Symbolics
 
 const Φ₀ = 2.067833848e-15              #Flux quantum
 
-@independent_variables t                            #Time variable
+@independent_variables t                #Time variable
 D = Differential(t)                     #First Differential operation
 D2 = Differential(t)^2                  #Second Differential operation
+
+#TODO: stable and dev component tagging to pass to circuit_model.jl
+struct ComponentAPI
+    accepted::Vector{Pair{String, Symbol}}
+    dev::Vector{Pair{String, Symbol}}
+end
 
 @connector Loop begin
     Φ(t), [connect = Flow]
@@ -111,16 +117,29 @@ end
     end
 end
 
-
-"""Example Usage
-loops = [
-["J1","L1"],
-["L2","C1"],
-["C1","R1"],
-["R1","I1"]
-]
-
-coupling = [(1,2)]
-
-circuit = process_netlist(loops, coupling)
-""" 
+@mtkmodel Port begin
+    @parameters begin
+        I=1.0
+        ω=0.0
+        R=50.0
+    end
+    @components begin
+        Rsrc = Resistor(R=R)
+        Isrc = CurrentSource(I=I, ω=ω)
+        in = Loop()
+        out = Loop()
+    end
+    @variables begin
+        i(t), [irreducible=true]
+        dθ(t), [irreducible=true]
+    end
+    @equations begin
+        [
+            connect(Isrc.out, Rsrc.in)
+            connect(Isrc.in, in)
+            connect(Rsrc.out, out)
+            i ~ Rsrc.i
+            dθ ~ D(Rsrc.θ)
+        ]
+    end
+end

@@ -5,49 +5,45 @@ using JosephsonLoops
 const jls = JosephsonLoops
 
 loops = [
-["I1", "R1"],
-["R1", "C1", "J1"]
+["P1", "C1", "J1"]
 ]
 
-ext_flux = [true, true]
+ext_flux = [true]
 
 
 circuit = jls.process_netlist(loops, ext_flux=ext_flux)
 
 #cirucit model ODAE system and initial condition vector are created.
 model, u0, guesses = jls.build_circuit(circuit)
+
+
 # we set the values of circuit parameters, for any parameters not specified; default values will be assigned.
     ps = [
-        jls.I1.ω => 100e6*2*pi
-        jls.I1.I => 1e-12
+        jls.P1.ω => 100e6*2*pi
+        jls.P1.I => 1e-12
         jls.C1.C => 100.0e-15
         jls.J1.C=> 1000.0e-15
         jls.J1.I0 => 1e-6
-        jls.R1.R => 50.0
         jls.J1.R => 1.0
-        jls.Φₑ2.Φₑ => 0.5
+        jls.Φₑ1.Φₑ => 0.0
     ]
-using DifferentialEquations
 
 #specify transient window for solver
 tspan = (0.0, 1e-6)
-using DifferentialEquations, ModelingToolkit
-# Create dictionary of initial conditions
-prob = DAEProblem(model, merge(Dict(u0),Dict(ps)), tspan, guesses=guesses)
 #transient circuit analysis
-sol = jls.tsolve(model, [] tspan, ps, alg = Rodas5())
+sol = jls.tsolve(model,u0, ps, tspan, guesses=guesses)
 jls.tplot(sol, jls.C1, units = "amps")
 
 # we can pass any arguments known to the problem interface of DifferentialEquations.jl, to achieve better results
-
 #saveat force the integrator to step at certain time points
-saveat = LinRange(10.0, 100.0, 1000)
+saveat = LinRange(0.0, 1e-6, 1000)
 
 #specify a different solving algorithim
 alg = Rodas5()
 
-@time sol = scsim.tsolve(model, u_initial, tspan, ps; saveat = saveat, alg = alg, abstol = 1e-6)
-scsim.tplot(sol, scsim.R1, units = "amps")
+sol = jls.tsolve(model, u0, ps, tspan;
+    guesses=guesses, saveat = saveat, solver_opts = alg, abstol = 1e-6)
+jls.tplot(sol, jls.C1, units = "amps")
 
 x = scsim.ensemble_fsolve(model, u0, tspan, (0.1, 10.0), ps, scsim.loop1, scsim.R1, units = "amps", Ntraj = 500)   
 
@@ -59,8 +55,8 @@ plot(x.u)
 include("../harmonic balance/colocation HB.jl")
 eqs, states = jls.get_full_equations(model, jls.t)
 
-harmonic_sys, harmonic_states = jls.harmonic_equation(eqs, states, jls.t, jls.I1.ω, 3)
-ns, harmonic_states = harmonic_equation(eqs, states, jls.t, jls.I1.ω, 3)
+harmonic_sys, harmonic_states = harmonic_equation(eqs, states, jls.t, jls.I1.ω, 3)
+ns, harmonic_states = jls.harmonic_equation(eqs, states, jls.t, jls.I1.ω, 3)
 
 @named ns = NonlinearSystem(harmonic_sys)
 sys =  ModelingToolkit.complete(structural_simplify(ns, fully_determined = false))

@@ -1,4 +1,4 @@
-using JosephsonLoops 
+using JosephsonLoops
 const jls = JosephsonLoops
 
 loops = [

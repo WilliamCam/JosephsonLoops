@@ -1,24 +1,57 @@
 
 #transient simulation of whole system
-function tsolve(model, u0, tspan, param_pairs; alg = Rodas5(), kwargs...)      
-    prob = ODEProblem(model, u0, tspan, param_pairs; kwargs...)   #Create an ODEProblem to solve for a specified time
-    sol = solve(prob, alg)
+function tsolve(model::System, u0::Vector{Pair{Num, Float64}}, 
+    param_pairs::Vector{Pair{Num, Float64}}, tspan::Tuple{Float64,Float64}; DAE=false, solver_opts = Rodas5(),  kwargs...)  
+    if DAE
+        prob = DAEProblem(model, merge(Dict(u0), Dict(param_pairs)), tspan; kwargs...)
+    else
+        prob = ODEProblem(model, merge(Dict(u0), Dict(param_pairs)), tspan; kwargs...)
+    end
+    sol = @time solve(prob, solver_opts)
     return sol                                                  #Return the solved ODEProblem
 end
 
 #Plot a current or voltage of a component (resistor or capacitor)
-function tplot(sol::ODESolution, c; units = "volts")
+function tplot(sol::ODESolution, c, model; units = "volts")
     if units == "amps"
-        y = sol[c.sys.i][2:end]
+        y = sol[c.i][2:end]
         ylabel = "Current (A)"
-        label = string(c.sys.i)
-    else
-        y = 1/(sol.t[2]-sol.t[1]) * Φ₀/(2.0*pi) * diff(sol[c.sys.θ])
+        label = string(c.i)
+    elseif units == "volts"
+        y = 1/(sol.t[2]-sol.t[1]) * Φ₀/(2.0*pi) * diff(sol[c.θ])
         ylabel = "Voltage  (V)"
-        label = replace(string(c.sys.θ), "θ" => "v")
+        label = replace(string(c.θ), "θ" => "v")
+    elseif units[1] == 'S'
+        @assert length(units) == 3 "Error: Please state scattering parameter in form 'Sij'"
+        port_i, i = units[2], parse(Int, units[2])
+        port_j, j = units[3], parse(Int, units[3])
+        S = get_scattering_matrix(model,port_i,port_j)
+        y = sol[S[i,j]]
+        ylabel = units
+        label = nothing
     end
     plot(sol.t[2:end], y, xlabel = "Time (s)", ylabel = ylabel, label = label)
 end
+
+function get_scattering_matrix(model::System,i::Char,j::Char)
+    port_i_sym = Symbol('P'*i)
+    port_j_sym = Symbol('P'*j)
+    @assert (hasproperty(model,port_i_sym)) "Error: Port $i not defined in variable map"
+    @assert (hasproperty(model,port_j_sym)) "Error: Port $j not defined in variable map"
+    N_ports = maximum([parse(Int,port_index) for port_index in [i,j]])
+    @assert (N_ports < 3) "Maximum of 2 port networks supported"
+    a = zeros(Num,1,N_ports)
+    b = zeros(Num,1,N_ports)
+    #TODO: assert port reference impedances are equal
+    for k in N_ports
+        port_k_sym = Symbol('P'*string(k))
+        port_k = getproperty(model, port_k_sym)
+        a[k] = 0.5/sqrt(port_k.Rsrc.R)*(port_k.dθ*Φ₀/2π+port_k.Rsrc.R*port_k.i)
+        b[k] = 0.5/sqrt(port_k.Rsrc.R)*(port_k.dθ*Φ₀/2π-port_k.Rsrc.R*port_k.i)
+    end
+    return a / b
+end
+
 
 #solve for the frequency response of some load component when subject to an AC source, by performing an ensemble of transient simulations
 function ensemble_fsolve(
