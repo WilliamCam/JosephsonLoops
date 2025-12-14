@@ -5,10 +5,11 @@ using JosephsonLoops
 const jls = JosephsonLoops
 
 loops = [
-["P1", "C1", "J1"]
+["I1", "R1"],
+["R1", "C1", "J1"]
 ]
 
-ext_flux = [true]
+ext_flux = [false, true]
 
 
 circuit = jls.process_netlist(loops, ext_flux=ext_flux)
@@ -19,13 +20,14 @@ model, u0, guesses = jls.build_circuit(circuit)
 
 # we set the values of circuit parameters, for any parameters not specified; default values will be assigned.
     ps = [
-        jls.P1.ω => 100e6*2*pi
-        jls.P1.I => 1e-12
+        jls.I1.ω => 100e6*2*pi
+        jls.I1.I => 1e-12
+        jls.R1.R => 50.0
         jls.C1.C => 100.0e-15
         jls.J1.C=> 1000.0e-15
         jls.J1.I0 => 1e-6
         jls.J1.R => 1.0
-        jls.Φₑ1.Φₑ => 0.0
+        jls.Φₑ2.Φₑ => 0.0
     ]
 
 #specify transient window for solver
@@ -55,39 +57,40 @@ plot(x.u)
 include("../harmonic balance/colocation HB.jl")
 eqs, states = jls.get_full_equations(model, jls.t)
 
-harmonic_sys, harmonic_states = harmonic_equation(eqs, states, jls.t, jls.I1.ω, 3)
-ns, harmonic_states = jls.harmonic_equation(eqs, states, jls.t, jls.I1.ω, 3)
+harmonic_system, harmonic_states = jls.harmonic_equation(eqs, states, jls.t, jls.I1.ω, 3)
 
-@named ns = NonlinearSystem(harmonic_sys)
-sys =  ModelingToolkit.complete(structural_simplify(ns, fully_determined = false))
-
+@named ns = NonlinearSystem(harmonic_system[1:end-1])
+sys =  mtkcompile(ns)
 
 I₀ = 1e-6
-R₀ = 5.0
+R₀ = 5000.0
 Id = 0.05e-6
 ωc = sqrt(2*pi *I₀/(jls.Φ₀*1000.0e-15))/(2*pi)
+1/sqrt(1000.0e-15*jls.Φ₀/(2*pi*I₀))/(2*pi)
+
 
 1/(2*pi*sqrt(1000.0e-12*1000.0e-15))
 
-N = 300
-ω_vec = 2*pi*(1:0.1:10)*1e12
+N = 100
+ω_vec = 2*pi*(8.5:0.005:9.5)*1e9
 solution1=Float64[]
 solution2=Float64[]
 u0_prev = zeros(12)
 for i in 1:1:length(ω_vec)
     ps = [
         jls.I1.ω => ω_vec[i]
-        jls.I1.I => -1e-6
+        jls.I1.I => 2.5e-9
         jls.C1.C => 100.0e-15
         jls.J1.C=> 1000.0e-15
-        jls.J1.I0 => 1e-6
-        jls.R1.R => 50.0
-        jls.J1.R => 1.0
+        jls.J1.I0 => I₀
+        jls.R1.R => 5000.0
+        jls.J1.R => 5000.0
     ]
-    prob = NonlinearProblem(sys,zeros(4), ps)
+    prob = NonlinearProblem(sys,zeros(12), ps)
     sol = solve(prob)
     u0_prev = sol
-    push!(solution1, sol[ns.A[1]]+ sqrt(sol[ns.A[2]]^2+sol[ns.B[1]]^2) + sqrt(sol[ns.C[2]]^2+sol[ns.D[1]]^2))
+    push!(solution1, sol[ns.A[1]]+ sqrt(sol[ns.A[2]]^2+sol[ns.B[1]]^2))
+    #push!(solution2, sol[ns.C[1]]+ sqrt(sol[ns.C[2]]^2+sol[ns.D[1]]^2))
 end
 using Plots
 
@@ -97,8 +100,8 @@ Vi = @. jls.Φ₀/(2*pi)*ω_vec*solution1
 ai = 0.5*(Vi+50*Ii)/50
 bi = 0.5*(Vi-50*conj.(Ii))/50
 
-plot(ω_vec/(2*pi), 10*log10.(abs2.(ai./bi)))
-using BifurcationKit
+plot(ω_vec/(2*pi), ((bi./ai)))
+#using BifurcationKit
 
 bif_par = jls.loop1.sys.ω
 p_start = [
@@ -110,7 +113,7 @@ p_start = [
         jls.J1.sys.I0 => 0.3e-6
         jls.R1.sys.R => 50.0
         jls.J1.sys.R => 1000.0
-        jls.loop2.sys.Φₑ => 0.0
+        jls.loop2.sys.Φₑ => 0.5
 ]
 u0_guess = sol
 plot_var = sys.A[2]

@@ -3,20 +3,31 @@ using ModelingToolkit
 using SymbolicUtils
 using QuestBase
 
+function var_is_in(vars::Vector, target_var::SymbolicUtils.BasicSymbolic{Real})
+    ret = false
+    for var in vars
+        if isequal(var, target_var)
+            ret = true
+            break
+        end
+    end
+return ret
+end
+
+function var_is_in(vars::Vector, target_var::Num)
+    ret = false
+    for var in vars
+        if isequal(var, target_var)
+            ret = true
+            break
+        end
+    end
+return ret
+end
+
 function get_full_equations(model::ModelingToolkit.System, tvar::Num)
     eqs = full_equations(model)
     states = unknowns(model)
-
-    function var_is_in(vars::Vector, target_var::SymbolicUtils.BasicSymbolic{Real})
-        ret = false
-        for var in vars
-            if isequal(var, target_var)
-                ret = true
-                break
-            end
-        end
-    return ret
-    end
 
     diff2vars = Vector{Num}()
     diffvars = Vector{Num}()
@@ -47,6 +58,18 @@ function get_full_equations(model::ModelingToolkit.System, tvar::Num)
         deleteat!(states, i)
     end
     return eqs, states
+end
+
+function only_derivatives(expr, var, tvar)
+    # The maximum order of derivative to check against.
+    # We must substitute all known derivative terms of `var`.
+    sub_rules = Dict(
+        Differential(tvar)(var) => 0,
+        Differential(tvar)(Differential(tvar)(var)) => 0,
+    )
+    expr_sub = substitute(expr, sub_rules)
+    remaining_vars = get_variables(expr_sub)
+    return !var_is_in(remaining_vars, var)
 end
 
 
@@ -91,6 +114,13 @@ function harmonic_equation(eqs, states, tvar, wvar, N)
         harmonic_state = harmonic_solution(N, tvar, wvar, cos_coeffs[1], sin_coeffs[1])
         push!(X, harmonic_state)
         dXdt, d2Xdt2 = get_derivatives(harmonic_state, tvar)
+        # if all(only_derivatives(eq, states[k], t) for eq in harmonic_eqs)
+        #     problematic_var = states[k]
+        #     print("Warning: harmonic variable mapped to first derivative i.e. D($problematic_var) = $harmonic_state")
+        #     #New harmonic state will be first derivative X = D(var)
+        #     harmonic_eqs = substitute(harmonic_eqs, Dict(Differential(tvar)(Differential(tvar)(states[k]))=>dXdt))
+        #     harmonic_eqs = substitute(harmonic_eqs, Dict(Differential(tvar)(states[k])=>harmonic_state))
+        # end
         harmonic_eqs = substitute(harmonic_eqs, Dict(Differential(tvar)(Differential(tvar)(states[k]))=>d2Xdt2))
         harmonic_eqs = substitute(harmonic_eqs, Dict(Differential(tvar)(states[k])=>dXdt))
         harmonic_eqs = substitute(harmonic_eqs, Dict(states[k]=>harmonic_state))
@@ -109,8 +139,8 @@ function harmonic_equation(eqs, states, tvar, wvar, N)
             push!(harmonic_system, res_at_coll ~ 0)
         end
     end
-    @mtkcompile ns = NonlinearSystem(harmonic_system)
-    return ns, X
+    #@mtkcompile ns = NonlinearSystem(harmonic_system)
+    return harmonic_system, X
 end
 
 function is_term(set, target_term)
