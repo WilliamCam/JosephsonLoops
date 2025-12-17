@@ -63,6 +63,24 @@ function tplot(sol::ODESolution, c; units = "volts")
     plot(sol.t[2:end], y, xlabel = "Time (s)", ylabel = ylabel, label = label)
 end
 
+function get_scattering_matrix(model::System,i::Char,j::Char)
+    port_i_sym = Symbol('P'*i)
+    port_j_sym = Symbol('P'*j)
+    @assert (hasproperty(model,port_i_sym)) "Error: Port $i not defined in variable map"
+    @assert (hasproperty(model,port_j_sym)) "Error: Port $j not defined in variable map"
+    N_ports = maximum([parse(Int,port_index) for port_index in [i,j]])
+    @assert (N_ports < 3) "Maximum of 2 port networks supported"
+    a = zeros(Num,1,N_ports)
+    b = zeros(Num,1,N_ports)
+    #TODO: assert port reference impedances are equal
+    for k in N_ports
+        port_k_sym = Symbol('P'*string(k))
+        port_k = getproperty(model, port_k_sym)
+        a[k] = 0.5/sqrt(port_k.Rsrc.R)*(port_k.dθ*Φ₀/2π+port_k.Rsrc.R*port_k.i)
+        b[k] = 0.5/sqrt(port_k.Rsrc.R)*(port_k.dθ*Φ₀/2π-port_k.Rsrc.R*port_k.i)
+    end
+    return a / b
+end
 #solve for the frequency response of some load component when subject to an AC source, by performing an ensemble of transient simulations
 function ensemble_fsolve(
         model::ODESystem, u0, tspan, fspan, param_pairs, source,  load; 
@@ -165,28 +183,6 @@ function ensemble_parameter_sweep(
     return sol
 end
 
-function sanitize_guesses(guesses, u0)
-    u0_dict = u0 isa AbstractDict ? u0 : Dict(u0)
-    g = Dict{Any, Any}()
-    for (k, v) in guesses
-        try
-            # if the guess maps a variable to itself (or is identical), replace it with a numeric guess
-            if v === k || v == k
-                if haskey(u0_dict, k)
-                    g[k] = float(u0_dict[k])
-                else
-                    g[k] = 0.0
-                end
-            else
-                g[k] = v
-            end
-        catch
-            # if comparison fails for some symbolic type, fallback to the original value
-            g[k] = v
-        end
-    end
-    return g
-end
 
 function set_param(pairs, key, val)
     out = Pair{Num,Float64}[]

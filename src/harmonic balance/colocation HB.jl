@@ -2,11 +2,7 @@ using Symbolics
 using ModelingToolkit
 using SymbolicUtils
 
-function get_full_equations(model::ModelingToolkit.System, tvar::Num)
-    eqs    = full_equations(model)
-    states = unknowns(model)
-
-    function var_is_in(vars::Vector, target_var::SymbolicUtils.BasicSymbolic{Real})
+function var_is_in(vars::Vector, target_var::SymbolicUtils.BasicSymbolic{Real})
         ret = false
         for var in vars
             if isequal(var, target_var)
@@ -16,6 +12,12 @@ function get_full_equations(model::ModelingToolkit.System, tvar::Num)
         end
         return ret
     end
+
+function get_full_equations(model::ModelingToolkit.System, tvar::Num)
+    eqs    = full_equations(model)
+    states = unknowns(model)
+
+
 
     diff2vars   = Vector{Num}()   # “2nd derivative” helper vars
     diffvars    = Vector{Num}()   # corresponding 1st-derivative vars
@@ -54,7 +56,6 @@ function get_full_equations(model::ModelingToolkit.System, tvar::Num)
 
     return eqs, states
 end
-
 
 function harmonic_solution(N, tvar, wvar, Afourier, Bfourier)
     X = Afourier[1]  # constant term A₀

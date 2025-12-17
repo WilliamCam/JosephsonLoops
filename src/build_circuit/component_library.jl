@@ -110,6 +110,32 @@ end
         i ~ I*sin(ω*t)
     end
 end
+@mtkmodel Port begin
+    @parameters begin
+        I=1.0
+        ω=0.0
+        R=50.0
+    end
+    @components begin
+        Rsrc = Resistor(R=R)
+        Isrc = CurrentSource(I=I, ω=ω)
+        in = Loop()
+        out = Loop()
+    end
+    @variables begin
+        i(t), [irreducible=true]
+        dθ(t), [irreducible=true]
+    end
+    @equations begin
+        [
+            connect(Isrc.out, Rsrc.in)
+            connect(Isrc.in, in)
+            connect(Rsrc.out, out)
+            i ~ Rsrc.i
+            dθ ~ D(Rsrc.θ)
+        ]
+    end
+end
 
 
 """Example Usage
