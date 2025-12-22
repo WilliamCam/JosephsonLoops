@@ -54,10 +54,8 @@ plot(x.u)
 
 
 #Harmonic Balance
-include("../harmonic balance/colocation HB.jl")
 eqs, states = jls.get_full_equations(model, jls.t)
-
-harmonic_system, harmonic_states = jls.harmonic_equation(eqs, states, jls.t, jls.I1.ω, 3)
+harmonic_system, harmonic_states = jls.harmonic_equation(eqs, states, jls.t, jls.I1.ω, 1)
 
 @named ns = NonlinearSystem(harmonic_system[1:end-1])
 sys =  mtkcompile(ns)
@@ -75,7 +73,7 @@ N = 100
 ω_vec = 2*pi*(8.5:0.005:9.5)*1e9
 solution1=Float64[]
 solution2=Float64[]
-u0_prev = zeros(12)
+u0_prev = zeros(4)
 for i in 1:1:length(ω_vec)
     ps = [
         jls.I1.ω => ω_vec[i]
@@ -86,7 +84,7 @@ for i in 1:1:length(ω_vec)
         jls.R1.R => 5000.0
         jls.J1.R => 5000.0
     ]
-    prob = NonlinearProblem(sys,zeros(12), ps)
+    prob = NonlinearProblem(sys,zeros(4), ps)
     sol = solve(prob)
     u0_prev = sol
     push!(solution1, sol[ns.A[1]]+ sqrt(sol[ns.A[2]]^2+sol[ns.B[1]]^2))
