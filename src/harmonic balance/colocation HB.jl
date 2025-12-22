@@ -1,77 +1,7 @@
 using Symbolics
-using ModelingToolkit
 using SymbolicUtils
+using ModelingToolkit
 using QuestBase
-
-function var_is_in(vars::Vector, target_var::SymbolicUtils.BasicSymbolic{Real})
-    ret = false
-    for var in vars
-        if isequal(var, target_var)
-            ret = true
-            break
-        end
-    end
-return ret
-end
-
-function var_is_in(vars::Vector, target_var::Num)
-    ret = false
-    for var in vars
-        if isequal(var, target_var)
-            ret = true
-            break
-        end
-    end
-return ret
-end
-
-function get_full_equations(model::ModelingToolkit.System, tvar::Num)
-    eqs = full_equations(model)
-    states = unknowns(model)
-
-    diff2vars = Vector{Num}()
-    diffvars = Vector{Num}()
-    remove_idxs = Int[]
-    for (i, eq) in enumerate(eqs)
-        vars = get_variables(eq.rhs)
-        if length(vars) == 1 && var_is_in(states, vars[1])
-            push!(diff2vars, vars[1])
-            push!(diffvars, get_variables(eq.lhs)[1])
-            push!(remove_idxs, i)
-        end
-    end
-
-    for i in reverse(remove_idxs)
-        deleteat!(eqs, i)
-    end
-
-    for (i,var) in enumerate(diffvars)
-        eqs = substitute(eqs, Dict(diff2vars[i]=>Differential(tvar)(diffvars[i])))
-    end
-    remove_idxs = Int[]
-    for (i,var) in enumerate(states)
-        if var_is_in(diff2vars, var)
-            push!(remove_idxs, i)
-        end
-    end
-    for i in reverse(remove_idxs)
-        deleteat!(states, i)
-    end
-    return eqs, states
-end
-
-function only_derivatives(expr, var, tvar)
-    # The maximum order of derivative to check against.
-    # We must substitute all known derivative terms of `var`.
-    sub_rules = Dict(
-        Differential(tvar)(var) => 0,
-        Differential(tvar)(Differential(tvar)(var)) => 0,
-    )
-    expr_sub = substitute(expr, sub_rules)
-    remaining_vars = get_variables(expr_sub)
-    return !var_is_in(remaining_vars, var)
-end
-
 
 function harmonic_solution(N, tvar, wvar, Afourier, Bfourier)
     X = Afourier[1]  # Start with the constant term A₀
@@ -79,13 +9,6 @@ function harmonic_solution(N, tvar, wvar, Afourier, Bfourier)
         X += Afourier[n + 1] * cos(n * wvar * tvar) + Bfourier[n] * sin(n * wvar * tvar)
     end
     return X
-end
-
-function get_derivatives(X, t)
-    D = Differential(t)
-    dXdt = Symbolics.expand_derivatives(D(X))
-    d2Xdt2 = Symbolics.expand_derivatives(D(dXdt))
-    return dXdt, d2Xdt2
 end
 
 function harmonic_equation(eqs, states, tvar, wvar, N)
@@ -141,28 +64,6 @@ function harmonic_equation(eqs, states, tvar, wvar, N)
     end
     #@mtkcompile ns = NonlinearSystem(harmonic_system)
     return harmonic_system, X
-end
-
-function is_term(set, target_term)
-    if typeof(set) == Equation
-        vars = get_variables(set)
-    elseif typeof(set) == SymbolicUtils.BasicSymbolic{Real}
-        vars = get_variables(set)
-    elseif typeof(set) == Num
-        vars = get_variables(set)
-    else
-        vars = set
-    end
-    ret = false
-    for term in vars
-        if isequal(term, target_term)
-            ret = true
-            break
-        else
-            ret = false
-        end
-    end
-    return ret
 end
 
 

@@ -53,12 +53,11 @@ I₀ = 1e-6
 R₀ = 50.0
 Id = 0.05e-6
 ωc = sqrt(2*pi *I₀/(jls.Φ₀*1000.0e-15))/(2*pi)
-1/sqrt(1000.0e-15*jls.Φ₀/(2*pi*Ic))/(2*pi)
 Ic = jls.Φ₀/(2*pi*1000.0e-12)
 
 1/(2*pi*sqrt(1000.0e-12*1000.0e-15))
 
-N = 200
+N = 100
 ω_vec = 2*pi*(4.5:0.001:5.0)*1e9
 solution1=Float64[]
 solution2=Float64[]
