@@ -49,7 +49,7 @@ function get_scattering_matrix(model::System,i::Char,j::Char)
         a[k] = 0.5/sqrt(port_k.Rsrc.R)*(port_k.dθ*Φ₀/2π+port_k.Rsrc.R*port_k.i)
         b[k] = 0.5/sqrt(port_k.Rsrc.R)*(port_k.dθ*Φ₀/2π-port_k.Rsrc.R*port_k.i)
     end
-    return a / b
+    return b / a
 end
 
 

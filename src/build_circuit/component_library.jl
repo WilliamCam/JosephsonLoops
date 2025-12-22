@@ -38,7 +38,7 @@ end
     @equations begin
         i ~ in.iₘ - out.iₘ #Define branch current as difference between loop currents
         0 ~ in.Φ + out.Φ #Flux flowing from left loop is equal to flux entering the right loop
-        θ ~ 2*pi/Φ₀*(in.Φ)  #define branch phase as flux flowing from input loop (just sets the parity)
+        θ ~ 2*pi/Φ₀*(out.Φ)  #define branch phase as flux flowing from input loop (just sets the parity)
     end
 end
 
@@ -118,14 +118,9 @@ end
 end
 
 @mtkmodel Port begin
-    @parameters begin
-        I=1.0
-        ω=0.0
-        R=50.0
-    end
     @components begin
-        Rsrc = Resistor(R=R)
-        Isrc = CurrentSource(I=I, ω=ω)
+        Rsrc = Resistor()
+        Isrc = CurrentSource()
         in = Loop()
         out = Loop()
     end
@@ -135,9 +130,9 @@ end
     end
     @equations begin
         [
-            connect(Isrc.out, Rsrc.in)
-            connect(Isrc.in, in)
-            connect(Rsrc.out, out)
+            connect(Isrc.in, Rsrc.in)
+            connect(Isrc.out, out)
+            connect(Rsrc.out, in)
             i ~ Rsrc.i
             dθ ~ D(Rsrc.θ)
         ]
