@@ -99,7 +99,7 @@ model = build_circuit(circuit)
 - `ArgumentError`: If an unrecognized component type is found in the netlist
 """
 
-function build_circuit(circuit::CircuitNetlist)
+function build_circuit(circuit::CircuitNetlist; no_tearing = false)
     #Load circuit from netlist
     loops = circuit.loops
     numLoops = size(loops)[1]
@@ -109,7 +109,8 @@ function build_circuit(circuit::CircuitNetlist)
     ext_flux = circuit.ext_flux
 
     #Use meta programming to construct MTK component objects parsing their given name.
-    built_components = Dict()                               
+    built_components = Dict()
+    built_ports = Dict()                               
     for j in branches                                      
         println(j)                                          
         if (j[1] == 'R')                                    
@@ -142,6 +143,7 @@ function build_circuit(circuit::CircuitNetlist)
             new_c = Meta.parse(new_c)
             new_c = eval(new_c)
             built_components[j] = new_c
+            built_ports[j] = new_c
         else
             throw(ArgumentError("Error: Netlist component was not recognised.Check docs for supported cirucit components and naming conventions."))
         end
@@ -156,7 +158,9 @@ function build_circuit(circuit::CircuitNetlist)
             eval(Meta.parse("@named Φₑ" * string(i) * "= ExternalFlux()"))
             built_components["Φₑ" * string(i)] = eval(Meta.parse("Φₑ" * string(i)))
         end
-    end                                 
+    end
+    
+    
     already_in_loop = String[]
     eqs=Equation[]
     ground_loop_connectables = []
@@ -215,17 +219,19 @@ function build_circuit(circuit::CircuitNetlist)
     #TODO: Make calling Dict more readable i.e. c[2]
     print(built_components)
 
-
     new_model = mtkcompile(model)
 
     guesses = Pair{Num,Float64}[]
     u0 = Pair{Num,Float64}[]
     for state_var in unknowns(new_model)
         push!(guesses, state_var => 0.0)
-        #TODO: Addition of ports creates initialization
+        #TODO: Addition of ports creates initialization errors
         #push!(u0, D(state_var) => 0.0)
     end
-
+    if no_tearing
+        model_nns = toggle_namespacing(model, false)
+        return model_nns, u0, guesses
+    end
     return new_model, u0, guesses                             
 end
 

@@ -1,4 +1,4 @@
-using ModelingToolkit, Symbolics
+using ModelingToolkit, Symbolics, ModelingToolkitStandardLibrary.Blocks
 
 const Φ₀ = 2.067833848e-15              #Flux quantum
 
@@ -110,7 +110,7 @@ end
     @extend Branch()
     @parameters begin
         I=1.0
-        ω=1.0
+        ω=1.0, [tunable=true]
     end
     @equations begin
         i ~ I*sin(ω*t)
@@ -131,10 +131,77 @@ end
     @equations begin
         [
             connect(Isrc.in, Rsrc.in)
-            connect(Isrc.out, out)
-            connect(Rsrc.out, in)
-            i ~ Rsrc.i
+            i ~ Rsrc.i 
             dθ ~ D(Rsrc.θ)
+            connect(Rsrc.out, in)
+            connect(Isrc.out, out)
+        ]
+    end
+end
+
+@mtkmodel InputCurrentSource begin
+    @extend Branch()
+    @components begin
+        I=RealInput()
+    end
+    @equations begin
+        i ~ I.u
+    end
+end
+
+@mtkmodel PumpTone begin
+    @components begin
+        output = RealOutput()
+    end
+    @parameters begin
+        _A = 1.0
+        _ω = 0.0, [tunable=true]
+    end
+    @equations begin
+        output.u ~ _A*sin(_ω*t)
+    end
+end
+
+@mtkmodel OutputFluxSense begin
+    @components begin
+        in = Loop()
+        out = Loop()
+    end
+    @variables begin
+        dθ(t)
+    end
+    @equations begin
+        in.iₘ ~ out.iₘ #ideal flux sensor
+        dθ ~ 2*pi/Φ₀*(out.Φ)
+        dθ ~ 2*pi/Φ₀*(-in.Φ)    
+    end
+end
+
+@mtkmodel AnalysisPort begin
+    #TODO: force port to ground with structural params ?
+    @parameters begin
+        I = 1.0
+        ω = 0.0
+    end
+    @components begin
+        in = Loop()
+        out = Loop()
+        Rport = Resistor()
+        source = InputCurrentSource()
+        sensor = OutputFluxSense()
+        pump_tone = PumpTone(_A=I, _ω=ω)
+    end
+    @equations begin
+        #cirucit structure
+        [
+            connect(source.in, Rport.in)
+            connect(Rport.out, sensor.in)
+            connect(sensor.out, in)
+            connect(source.out, out)
+        ]
+        #analysis points
+        [
+            connect(pump_tone.output, :drive, source.I)
         ]
     end
 end
