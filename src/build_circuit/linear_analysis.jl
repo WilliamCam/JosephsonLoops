@@ -17,7 +17,7 @@ diff_eq = Differential(t)(Differential(t)(x)) + ω0^2*x + α*x^3 + η*Differenti
 Nharmonics = 1
 
 #Collocation HB (this is different from Kosata 2022 / HarmonicBalance.jl)
-harmonic_sys, harmonic_states = harmonic_equation(diff_eq, x, t, ω, 1)
+harmonic_sys, harmonic_states = harmonic_equation(diff_eq, x, t, ω, Nharmonics)
 harmonic_sys
 @named ns = NonlinearSystem(harmonic_sys)
 sys_nns = toggle_namespacing(ns, false)
@@ -25,7 +25,7 @@ sys_nns = toggle_namespacing(ns, false)
 @time jac = calculate_jacobian(sys_nns)
 #system tearing
 sys =  mtkcompile(ns)
-
+sys
 #Solve HB system for frequencies (Large signal pump)
 N = 100
 ω_vec = range(0.9,1.2,N) #pump freqs
@@ -37,14 +37,15 @@ for i in 1:1:N
     prob = NonlinearProblem(sys,u0, ps)
     sol = solve(prob)
     # update u0 for continuation, for this example this gives us the high amplitude branch
-    # u0 = sol.u
+    #u0 = sol.u
     push!(solution,  sol[ns.A[1]] + sqrt(sol[ns.A[2]]^2+sol[ns.B[1]]^2))
     push!(state_storage,  sol.u)
 end
 plot(ω_vec ,solution)
 
 #we will linearize around a single pump tone
-ωp = ω_vec[30]
+j = 26
+ωp = ω_vec[j]
 ps = [α => 1.0, ω0 => 1.0, F => 0.01, η => 0.1, ω=> ωp, γ=>1.0e-3]
 
 # can either solve the problem again for U₀ at pump tone, or re-use solution from previous loop
@@ -55,7 +56,7 @@ ps = [α => 1.0, ω0 => 1.0, F => 0.01, η => 0.1, ω=> ωp, γ=>1.0e-3]
 #_sub_rules = Dict(vars.=>sol[vars])
 
 #set the working point U₀
-working_point = state_storage[end]
+working_point = state_storage[j]
 vars=unknowns(sys)
 # we do this because MTK does not preserve the ordering of varaibles i.e. [A[1], A[2], B[1], etc]
 _sub_rules = Dict(vars.=>working_point)
@@ -63,8 +64,9 @@ _sub_rules = Dict(vars.=>working_point)
 #J₁ is approximated as δJ/δω
 jac_1 = Symbolics.derivative.(jac, ω)
 
+N=500
 #small signal frequency vector
-Ω = range(0.9,1.2,300)
+Ω = range(0.9,1.2,N)
 
 #update jacobian with numeric values
 sub_rules=merge(Dict(ps), _sub_rules, Dict(ω=>ωp))
@@ -76,9 +78,9 @@ perturb = [1e-3; 0.0; 1e-3]
 
 #Linear analysis solve loop
 out = []
-for i in 1:1:300
+for i in 1:1:N
     # this matrix is precicesly eq. (5.12) of Kosata 2022 simplified for a single harmonic (N=1)
-    mat = J₀ + 1im*(Ω[i] - ωp)*J₁
+    mat = J₀ + (Ω[i] - ωp)*J₁
     #Julia linear algebra matrix solver M = A \ B
     resp = mat \ perturb
     #push!(out, 2*(resp[1]^2+resp[3]^2))
@@ -86,7 +88,6 @@ for i in 1:1:300
     push!(out, u^2 + v^2)
 end
 #plot our solution
-plot(ωs_vec, abs.(out))
+plot(Ω, abs.(out))
 
 
-out
