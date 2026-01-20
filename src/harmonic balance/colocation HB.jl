@@ -2,6 +2,7 @@ using Symbolics
 using SymbolicUtils
 using ModelingToolkit
 using QuestBase
+include("HB_utils.jl")
 
 function harmonic_solution(N, tvar, wvar, Afourier, Bfourier)
     X = Afourier[1]  # Start with the constant term A₀
@@ -70,26 +71,29 @@ end
 #### Example Usage
 
 # @variables t x(t) # declare constant variables and a function x(t)
-# @parameters  α ω ω0 F η 
-# diff_eq = Differential(t)(Differential(t)(x)) + ω0^2*x + α*x^3 + η*Differential(t)(x)*x^2 - F*cos(ω*t) ~ 0
+# @parameters  α ω ω0 F γ η
+# diff_eq = Differential(t)(Differential(t)(x)) + ω0^2*x + α*x^3 + η*Differential(t)(x)*x^2 + γ*Differential(t)(x) - F*cos(ω*t) ~ 0
 
-# Nharmonics = 3
+# Nharmonics = 1
 
-# harmonic_sys, harmonic_states = harmonic_equation(diff_eq, x, t, ω, 3)
+# harmonic_sys, harmonic_states = harmonic_equation(diff_eq, x, t, ω, 1)
 # harmonic_sys
 # @named ns = NonlinearSystem(harmonic_sys)
-# sys = structural_simplify(ns)
+# sys_nns = toggle_namespacing(ns, false)
+# @time jac = calculate_jacobian(sys_nns)
+# sys =  mtkcompile(ns)
 
-# N = 300
+# N = 100
 # ω_vec = range(0.9,1.2,N)
 # solution=[]
-
+# state_storage = []
+# u0 = zeros(2*Nharmonics+1)
 # for i in 1:1:N
-#     ps = [α => 0.05, ω0 => 1.0, F => 10, η => 0.1, ω=> ω_vec[i]]
-#     prob = NonlinearProblem(sys,zeros(2*Nharmonics+1), ps)
+#     ps = [α => 1.0, ω0 => 1.0, F => 0.01, η => 0.1, ω=> ω_vec[i], γ=>1.0e-3]
+#     prob = NonlinearProblem(sys,u0, ps)
 #     sol = solve(prob)
-#     push!(solution,  sol[ns.A[1]] + sqrt(sol[ns.A[4]]^2+sol[ns.B[3]]^2))
+#     u0 = sol.u
+#     push!(solution,  sol[ns.A[1]] + sqrt(sol[ns.A[2]]^2+sol[ns.B[1]]^2))
+#     push!(state_storage,  sol.u)
 # end
-
-# plot(solution)
-
+# plot(ω_vec ,solution)

@@ -53,9 +53,10 @@ heqs = harmonic_system[1:end-1]
 sys_nns = toggle_namespacing(ns, false)
 @time jac = calculate_jacobian(sys_nns)
 sys =  mtkcompile(ns)
+ns
 
 
-I₀ = 1e-6
+sI₀ = 1e-6
 R₀ = 50.0
 Id = 0.05e-6
 ωc = sqrt(2*pi *I₀/(jls.Φ₀*1000.0e-15))/(2*pi)
