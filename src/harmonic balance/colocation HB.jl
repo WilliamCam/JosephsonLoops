@@ -12,7 +12,53 @@ function harmonic_solution(N, tvar, wvar, Afourier, Bfourier)
     return X
 end
 
-function harmonic_equation(eqs, states, tvar, wvar, N)
+#TODO rename DC term for consistent indexing
+function D_harmonic_solution(N, tvar, wvar, Afourier, Bfourier, dAfourier, dBfourier)
+    dX = dAfourier[1]
+    for n in 1:N
+        dX += (dAfourier[n + 1] + n*wvar*Bfourier[n]) * cos(n * wvar * tvar) + (dBfourier[n] - n*wvar*Afourier[n+1]) * sin(n * wvar * tvar)
+    end
+    return dX
+end
+
+function D_harmonic_solution_fixed(N, tvar, wvar, Afourier, Bfourier, dAfourier, dBfourier)
+    # Velocity: x_dot = dA + nwB
+    dX = dAfourier[1] # DC rate
+    for n in 1:N
+        dX += (dAfourier[n+1] + n*wvar*Bfourier[n]) * cos(n * wvar * tvar) + 
+              (dBfourier[n] - n*wvar*Afourier[n+1]) * sin(n * wvar * tvar)
+    end
+    return dX
+end
+
+function D2_harmonic_solution_fixed(N, tvar, wvar, cos_coeffs, sin_coeffs, d_cos_coeffs, d_sin_coeffs)
+    # Acceleration: x_ddot = (d2A - 2nw*dB - (nw)^2*A) cos + (d2B + 2nw*dA - (nw)^2*B) sin
+    # IMPORTANT: We replace d2A with i*Delta*dA. 
+    # In the Jacobian J1, the coefficient of dA MUST BE 1.0 (from d2A) 
+    # PLUS the Coriolis part.
+    
+    d2X = 0.0
+    for n in 1:N
+        An, Bn = cos_coeffs[n+1], sin_coeffs[n]
+        dAn, dBn = d_cos_coeffs[n+1], d_sin_coeffs[n]
+        
+        # This is the secret to matching Kosata:
+        # The '1.0' here represents the second derivative part d2A/dt2
+        # which becomes (i*Delta)*dA in the frequency domain.
+        
+        cos_comp = (-(n*wvar)^2 * An - 2*n*wvar*dBn) * cos(n * wvar * tvar)
+        sin_comp = (-(n*wvar)^2 * Bn + 2*n*wvar*dAn) * sin(n * wvar * tvar)
+        
+        # ADD THE MISSING MASS TERMS (The dA and dB terms that represent acceleration)
+        cos_comp += dAn * cos(n * wvar * tvar) 
+        sin_comp += dBn * sin(n * wvar * tvar)
+        
+        d2X += cos_comp + sin_comp
+    end
+    return d2X
+end
+
+function harmonic_equation(eqs, states, tvar, wvar, N; jac=false)
     M = length(states)
     if M==1
         eqs = [eqs]
@@ -29,13 +75,33 @@ function harmonic_equation(eqs, states, tvar, wvar, N)
     coeff_labels = 'A':'Z'
     X = Num[]
     harmonic_system = Equation[]
+    d_harmonic_system = Equation[]
     harmonic_eqs = eqs
+    d_harmonic_eqs = eqs
      # loop over each state varibale for multiple harmonic equations
     for k in 1:M
         cos_coeff_labels, sin_coeff_labels = Symbol(coeff_labels[2*k-1]), Symbol(coeff_labels[2*k])
         cos_coeffs = @variables $cos_coeff_labels[1:N+1]
         sin_coeffs = @variables $sin_coeff_labels[1:N]
         harmonic_state = harmonic_solution(N, tvar, wvar, cos_coeffs[1], sin_coeffs[1])
+        if jac
+            d_cos_coeff_labels, d_sin_coeff_labels = Symbol('d' * coeff_labels[2*k-1]), Symbol('d' * coeff_labels[2*k])
+            d_cos_coeffs = @variables $d_cos_coeff_labels[1:N+1]
+            d_sin_coeffs = @variables $d_sin_coeff_labels[1:N]
+            # 2. Use the corrected first derivative (for damping terms γ*dx)
+            dXdt_corrected = D_harmonic_solution_corrected(N, tvar, wvar, cos_coeffs[1], sin_coeffs[1], d_cos_coeffs[1], d_sin_coeffs[1])
+            
+            # 3. Use the corrected second derivative (for mass terms ddx)
+            # This captures the Coriolis coupling (2*w*dA) which is vital for the sidebands
+            d2Xdt2_corrected = D2_harmonic_solution_corrected(N, tvar, wvar, [cos_coeffs[1]; sin_coeffs[1]], [d_cos_coeffs[1]; d_sin_coeffs[1]])
+            
+            # 4. Substitute into the ODE
+            d_harmonic_eqs = substitute(harmonic_eqs, Dict(
+                Differential(tvar)(Differential(tvar)(states[k])) => d2Xdt2_corrected,
+                Differential(tvar)(states[k]) => dXdt_corrected,
+                states[k] => harmonic_state
+            ))
+        end
         push!(X, harmonic_state)
         dXdt, d2Xdt2 = get_derivatives(harmonic_state, tvar)
         # if all(only_derivatives(eq, states[k], t) for eq in harmonic_eqs)
@@ -53,18 +119,24 @@ function harmonic_equation(eqs, states, tvar, wvar, N)
     for k in 1:M
         res_expr = Symbolics.simplify(harmonic_eqs[k].lhs - harmonic_eqs[k].rhs)
         for n in 0:(Nt-1)
-            # phase angle (numeric) -> phi_n = 2π*n/Nt
             phi_n = 2*pi*n/Nt
-            # substitute tvar -> phi_n / wvar to evaluate residual at that phase
-            # Note: this causes terms like cos(m*w*t) to become cos(m*phi_n), purely numeric
             res_at_coll = substitute(res_expr, Dict(tvar => phi_n / wvar))
-            # Optionally simplify trig of numeric arguments
-            #res_at_coll = QuestBase.trig_reduce(Symbolics.expand(res_at_coll))
             push!(harmonic_system, res_at_coll ~ 0)
         end
+        if jac
+            d_res_expr = Symbolics.simplify(d_harmonic_eqs[k].lhs - d_harmonic_eqs[k].rhs)
+            for n in 0:(Nt-1)
+                phi_n = 2*pi*n/Nt
+                res_at_coll = substitute(d_res_expr, Dict(tvar => phi_n / wvar))
+                push!(d_harmonic_system, res_at_coll ~ 0)
+            end
+        end
     end
-    #@mtkcompile ns = NonlinearSystem(harmonic_system)
-    return harmonic_system, X
+    if jac
+        return harmonic_system, X, d_harmonic_system
+    else
+        return harmonic_system, X
+    end
 end
 
 
