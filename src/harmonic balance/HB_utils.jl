@@ -121,3 +121,41 @@ function is_term(set, target_term)
     end
     return ret
 end
+
+function hbsweep(sys, jls, ns)
+    I₀ = 1e-6
+    R₀ = 50.0
+    Id = 0.05e-6
+    ωc = sqrt(2*pi *I₀/(jls.Φ₀*1000.0e-15))/(2*pi)
+    Ic = jls.Φ₀/(2*pi*1000.0e-12)
+    ω_vec = 2*pi*(4.5:0.001:5.0)*1e9
+    N = length(ω_vec)
+    solution1 = Vector{Float64}(undef, N)
+    solution2 = Vector{Float64}(undef, N)
+
+    ps = [
+        jls.P1.Isrc.ω => ω_vec[1]
+        jls.P1.Isrc.I => 0.00565e-6
+        jls.C1.C      => 100.0e-15
+        jls.J1.C      => 1000.0e-15
+        jls.J1.I0     => Ic
+        jls.P1.Rsrc.R => 50.0
+        jls.J1.R      => 1e9
+    ]
+    u0_vals = zeros(6)
+    u0_map = unknowns(sys) .=> u0_vals
+    prob = NonlinearProblem(sys, u0_map, ps)
+    for i in 1:N
+        # Update only frequency using remake
+        new_prob = remake(prob, p = [jls.P1.Isrc.ω => ω_vec[i]])
+        
+        sol = solve(new_prob)
+        
+        # Calculate magnitudes (Harmonic Ansatz: sqrt(A^2 + B^2))
+        solution1[i] = sqrt(sol[ns.C[1]]^2 + sol[ns.D[1]]^2)
+        solution2[i] = sqrt(sol[ns.A[1]]^2 + sol[ns.B[1]]^2)
+    end
+
+    return ω_vec, solution1, solution2
+end
+    
