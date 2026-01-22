@@ -87,7 +87,7 @@ ns
 #     push!(solution2,  sqrt(sol[ns.G[2]]^2+sol[ns.H[1]]^2))
 # end
 
-ω_vec, solution1, solution2 = @time hbsweep(sys, jls, ns)
+ω_vec, solution1, solution2 = @time hbsweep(sys, jls,  ns)
 using Plots
 Ii = @. abs(0.00565e-6 - (solution1))
 Vi = @. abs(jls.Φ₀/(2*pi)*solution2)

@@ -26,6 +26,33 @@ struct CircuitNetlist
     branches::Vector{String}
 end
 
+struct HarmonicSystem
+    sys::NonlinearSystem
+    eqs::Vector{Equation}
+    variables::Vector{Symbol}
+    harmonics::int
+    jac_tuple
+end
+
+struct HarmonicProblem
+    sys::HarmonicSystem
+    u0::Vector{Float64}
+    ps::Dict{Num, Float64}
+    sweep_sym::Num
+    sweep_range::AbstractVector{Float64}
+end 
+
+struct HarmonicSolution
+    prob::HarmonicProblem
+    sweep_vals::Vector{Float64}
+    states::Vector
+    retcode::Symbol
+end
+
+
+
+
+
 function find_components(loops::Vector{Vector{String}})
     numLoops = size(loops)[1]                      
     component_loop_mapping = Dict{String, Vector{Int}}()
