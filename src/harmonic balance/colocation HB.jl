@@ -110,7 +110,7 @@ function harmonic_equation(eqs, states, tvar, wvar, N; jac=false)
         J0, J1 = build_jacobians(rotated_system, vars, dvars) 
         return sys, X, (J0, J1);
     else
-        return sys, X
+        return harmonic_system, X
     end
 end
 
