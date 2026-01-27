@@ -114,3 +114,4 @@ function harmonic_equation(eqs, states, tvar, wvar, N; jac=false)
     end
 end
 
+

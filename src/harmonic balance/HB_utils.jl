@@ -1,6 +1,22 @@
 using Symbolics
 using SymbolicUtils
 
+
+struct HarmonicProblem
+    sys  # The algebraic NonlinearSystem
+    N::Int
+    omega::Num
+    omega_val::Float64
+end
+
+struct HarmonicSweepResult
+    sweep_var::Num
+    sweep_vals::Vector{Float64}
+    results::Dict{Num, Vector{Float64}} # Maps symbolic variables to result vectors
+    prob::HarmonicProblem
+end
+
+
 function var_is_in(vars::Vector, target_var::SymbolicUtils.BasicSymbolic{Real})
     ret = false
     for var in vars
@@ -91,7 +107,7 @@ function get_full_equations(model::ModelingToolkit.System, tvar::Num)
     remove_idxs = Int[]
     for (i,var) in enumerate(states)
         if var_is_in(diff2vars, var)
-            push!(remove_idxs, i)
+            push!(remove_idxs, i)   
         end
     end
     for i in reverse(remove_idxs)
@@ -122,42 +138,42 @@ function is_term(set, target_term)
     return ret
 end
 
-function hbsweep(sys, jls, ns)
-    I₀ = 1e-6
-    R₀ = 50.0
-    Id = 0.05e-6
-    ωc = sqrt(2*pi *I₀/(jls.Φ₀*1000.0e-15))/(2*pi)
-    Ic = jls.Φ₀/(2*pi*1000.0e-12)
-    ω_vec = 2*pi*(4.5:0.001:5.0)*1e9
-    N = length(ω_vec)
-    solution1 = Vector{Float64}(undef, N)
-    solution2 = Vector{Float64}(undef, N)
+# function hbsweep(sys, jls, ns)
+#     I₀ = 1e-6
+#     R₀ = 50.0
+#     Id = 0.05e-6
+#     ωc = sqrt(2*pi *I₀/(jls.Φ₀*1000.0e-15))/(2*pi)
+#     Ic = jls.Φ₀/(2*pi*1000.0e-12)
+#     ω_vec = 2*pi*(4.5:0.001:5.0)*1e9
+#     N = length(ω_vec)
+#     solution1 = Vector{Float64}(undef, N)
+#     solution2 = Vector{Float64}(undef, N)
 
-    ps = [
-        jls.P1.Isrc.ω => ω_vec[1]
-        jls.P1.Isrc.I => 0.00565e-6
-        jls.C1.C      => 100.0e-15
-        jls.J1.C      => 1000.0e-15
-        jls.J1.I0     => Ic
-        jls.P1.Rsrc.R => 50.0
-        jls.J1.R      => 1e9
-    ]
-    u0_vals = zeros(6)
-    u0_map = unknowns(sys) .=> u0_vals
-    prob = NonlinearProblem(sys, u0_map, ps)
-    for i in 1:N
-        # Update only frequency using remake
-        new_prob = remake(prob, p = [jls.P1.Isrc.ω => ω_vec[i]])
+#     ps = [
+#         jls.P1.Isrc.ω => ω_vec[1]
+#         jls.P1.Isrc.I => 0.00565e-6
+#         jls.C1.C      => 100.0e-15
+#         jls.J1.C      => 1000.0e-15
+#         jls.J1.I0     => Ic
+#         jls.P1.Rsrc.R => 50.0
+#         jls.J1.R      => 1e9
+#     ]
+#     u0_vals = zeros(6)
+#     u0_map = unknowns(sys) .=> u0_vals
+#     prob = NonlinearProblem(sys, u0_map, ps)
+#     for i in 1:N
+#         # Update only frequency using remake
+#         new_prob = remake(prob, p = [jls.P1.Isrc.ω => ω_vec[i]])
         
-        sol = solve(new_prob)
+#         sol = solve(new_prob)
         
-        # Calculate magnitudes (Harmonic Ansatz: sqrt(A^2 + B^2))
-        solution1[i] = sqrt(sol[ns.C[1]]^2 + sol[ns.D[1]]^2)
-        solution2[i] = sqrt(sol[ns.A[1]]^2 + sol[ns.B[1]]^2)
-    end
+#         # Calculate magnitudes (Harmonic Ansatz: sqrt(A^2 + B^2))
+#         solution1[i] = sqrt(sol[ns.C[1]]^2 + sol[ns.D[1]]^2) #check if push! is better
+#         solution2[i] = sqrt(sol[ns.A[1]]^2 + sol[ns.B[1]]^2)
+#     end
 
-    return ω_vec, solution1, solution2
-end 
+#     return ω_vec, solution1, solution2
+# end 
 function build_jacobians(rotated_system, vars, dvars)
     #TODO check ordering
     _jac = Symbolics.jacobian(rotated_system, vars)
@@ -189,4 +205,123 @@ function rotate_to_harmonic_frame(N, Nt, harmonic_system)
     return simplify.(rotated_system)
 end
 
+
+
+
+
+"""
+    HarmonicProblem(sys, omega_pair::Pair; N::Int=1)
+
+Constructs a harmonic balance problem from a time-domain dynamical system.
+
+This function transforms a differential equation system (likely an ODESystem) into a system of nonlinear algebraic equations representing the harmonic coefficients. It automatically identifies or defines the independent variable (time) and expands the system variables into their harmonic series representations up to order $N$.
+
+# Arguments
+- `sys`: The system model (typically a `ModelingToolkit.ODESystem`) containing the differential equations.
+- `omega_pair::Pair`: A pair defining the fundamental frequency variable and its fixed value (e.g., `ω => 2.0`).
+
+# Keywords
+- `N::Int=1`: The number of harmonics to include in the expansion (truncation order). Higher values increase accuracy but increase computational cost.
+
+# Returns
+- `HarmonicProblem`: A struct containing the expanded nonlinear system (`complete_sys`), the harmonic order, and the frequency definitions.
+
+# Details
+If the generated system is over-determined (more equations than variables), the function automatically truncates the equation set to match the number of unknowns.
+"""
+function HarmonicProblem(sys, omega_pair::Pair; N::Int=1)
+    # 1. Handle Time Variable
+    tvar = nothing
+    try
+        tvar = ModelingToolkit.get_iv(sys)
+    catch
+        @variables t
+        tvar = t
+    end
+    tvar = Num(tvar)
+
+    wvar = first(omega_pair)
+    wval = last(omega_pair)
+
+    eqs, states = get_full_equations(sys, tvar)
+
+    nonlinear_sys, _ = harmonic_equation(eqs, states, tvar, wvar, N)
+    sys_eqs = equations(nonlinear_sys)
+    sys_vars = unknowns(nonlinear_sys)
     
+    if length(sys_eqs) > length(sys_vars)
+        n_drop = length(sys_eqs) - length(sys_vars)
+        sys_eqs = sys_eqs[1:end-n_drop]
+    end
+
+    @named complete_sys = NonlinearSystem(sys_eqs, sys_vars, parameters(sys))
+    
+    return HarmonicProblem(complete_sys, N, wvar, wval)
+end
+
+"""
+    solve_sweep(prob::HarmonicProblem, base_params, sweep_pair) -> HarmonicSweepResult
+
+Performs a parameter sweep on the harmonic problem using zero-order continuation.
+
+This function structurally simplifies the harmonic system and solves it repeatedly across a range of parameter values. It uses the solution from the previous step as the initial guess for the current step to ensure convergence along the solution branch.
+
+# Arguments
+- `prob::HarmonicProblem`: The harmonic problem struct created by `HarmonicProblem`.
+- `base_params`: A collection (Dict or Vector) of fixed parameter values required to fully define the system.
+- `sweep_pair`: A pair where the first element is the symbolic parameter to vary and the second is an iterable of values (e.g., `k => 0.0:0.1:5.0`).
+
+# Returns
+- `HarmonicSweepResult`: A struct containing:
+    - The swept variable name.
+    - The vector of swept values.
+    - A Dictionary mapping system variables (Num) to vectors of their computed values across the sweep.
+    - The original problem definition.
+
+# Details
+The function automatically initializes unknown variables to `0.001` for the first solve. For subsequent steps, it uses `remake` on the `NonlinearProblem` to update parameters and initial guesses efficiently.
+"""
+
+function solve_sweep(prob::HarmonicProblem, base_params, sweep_pair)
+    sweep_var, sweep_vals = sweep_pair
+    sys = prob.sys
+    simplesys = structural_simplify(sys)
+    # Setup Parameters
+    current_params = Dict(base_params)
+    if !haskey(current_params, prob.omega)
+         current_params[prob.omega] = prob.omega_val
+    end
+    current_params[sweep_var] = first(sweep_vals)
+    
+    system_unknowns = unknowns(simplesys)
+    u0_guess = [v => 0.001 for v in system_unknowns]
+    
+    # Define Problem ONCE
+    nl_prob = NonlinearProblem(simplesys, u0_guess, current_params)
+    
+    results = Dict{Num, Vector{Float64}}()
+    for v in system_unknowns
+        results[v] = Float64[]
+        sizehint!(results[v], length(sweep_vals))
+    end
+    
+    println("Sweeping $(sweep_var) over $(length(sweep_vals)) points...")
+    local last_u = nothing
+
+    for val in sweep_vals
+        # Continuation: Use previous result as guess
+        if last_u !== nothing
+            nl_prob = remake(nl_prob; u0 = last_u, p = [sweep_var => val])
+        else
+            nl_prob = remake(nl_prob; p = [sweep_var => val])
+        end
+        
+        sol = solve(nl_prob)
+        last_u = sol.u
+       
+        for (i, v) in enumerate(system_unknowns)
+            push!(results[v], sol.u[i])
+        end
+    end
+    return HarmonicSweepResult(sweep_var, collect(sweep_vals), results, prob)
+end
