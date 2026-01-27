@@ -14,9 +14,9 @@ model, u0, guesses = jls.build_circuit(circuit)
 
 # we set the values of circuit parameters, for any parameters not specified; default values will be assigned.
     ps = [
-        jls.P1.Isrc.ω => 100e6*2*pi
-        jls.P1.Isrc.I => 1e-12
-        jls.P1.Rsrc.R => 50.0
+        jls.P1.ω => 100e6*2*pi
+        jls.P1.I => 1e-12
+        jls.P1.Rport.R => 50.0
         jls.C1.C => 100.0e-15
         jls.J1.C=> 1000.0e-15
         jls.J1.I0 => 1e-6
@@ -46,10 +46,17 @@ eqs, states = jls.get_full_equations(model, jls.t)
 
 harmonic_system, harmonic_states = jls.harmonic_equation(eqs, states, jls.t, jls.P1.Isrc.ω, 1)
 
-@named ns = NonlinearSystem(harmonic_system[1:end-1])
-sys =  mtkcompile(ns)
+heqs = harmonic_system[1:end-1]
 
-I₀ = 1e-6
+#[0~Icos-ns.F[1]]
+@named ns = NonlinearSystem(heqs)
+sys_nns = toggle_namespacing(ns, false)
+@time jac = calculate_jacobian(sys_nns)
+sys =  mtkcompile(ns)
+ns
+
+
+sI₀ = 1e-6
 R₀ = 50.0
 Id = 0.05e-6
 ωc = sqrt(2*pi *I₀/(jls.Φ₀*1000.0e-15))/(2*pi)
@@ -90,3 +97,18 @@ bi = 0.5*(Vi-50.0*(Ii))/sqrt(50.0)
 
 plot(ω_vec/(2*pi), (bi./ai))
 
+#Linear Analysis
+
+ps = [
+    jls.P1.Isrc.ω => 4.75e9*2*pi
+    jls.P1.Isrc.I => 0.00565e-6
+    jls.C1.C => 100.0e-15
+    jls.J1.C=> 1000.0e-15
+    jls.J1.I0 => Ic
+    jls.P1.Rsrc.R => 50.0
+    jls.J1.R => 1e9
+]
+prob = NonlinearProblem(sys, zeros(6), ps)
+@time sol = solve(prob)
+op_point = sol
+unknowns(sys_nns)

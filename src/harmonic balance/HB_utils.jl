@@ -121,3 +121,36 @@ function is_term(set, target_term)
     end
     return ret
 end
+
+function build_jacobians(rotated_system, vars, dvars)
+    #TODO check ordering
+    _jac = Symbolics.jacobian(rotated_system, vars)
+    jac_0 = Num.(simplify(substitute(_jac, Dict(dvars .=> 0))))
+    jac_1 = Symbolics.jacobian(rotated_system, dvars)
+    return jac_0, jac_1
+end
+
+function rotate_to_harmonic_frame(N, Nt, harmonic_system)
+    Γ = Matrix{Num}(undef, 2N + 1, Nt)
+    # Currently only works for one harmonic ansatz. e.g. M=1
+    for j in 1:Nt
+        # 1. Place DC at the first index [1, j]
+        Γ[1, j] = Num(1//Nt)
+        # 2. Place Cosines at indices [2 to N+1]
+        for n in 1:N
+            phase = n * (j - 1) * (2π / Nt)
+            Γ[n + 1, j] = Num((2//Nt) * cos(phase))
+        end
+        # 3. Place Sines at indices [N+2 to 2N+1]
+        for n in 1:N
+            phase = n * (j - 1) * (2π / Nt)
+            Γ[N + 1 + n, j] = Num((2//Nt) * sin(phase))
+        end
+    end
+    
+    # Perform the rotation/projection
+    rotated_system = Γ * [equation.lhs for equation in harmonic_system]
+    
+    return simplify.(rotated_system)
+end
+
