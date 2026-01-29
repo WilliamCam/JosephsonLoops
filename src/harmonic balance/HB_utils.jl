@@ -235,7 +235,7 @@ function HarmonicProblem(sys, ωvar::Num; tearing::Bool=true, N::Int=1)
 
     eqs, states = get_full_equations(sys, tvar)
 
-    nonlinear_sys, _ = harmonic_equation(eqs, states, tvar, ωvar, N) # wouldnt we need an omega value here??
+    nonlinear_sys, _ = harmonic_equation(eqs, states, tvar, ωvar, N) 
     sys_eqs = equations(nonlinear_sys)
     sys_vars = unknowns(nonlinear_sys)
     
@@ -258,7 +258,7 @@ function HarmonicProblem(sys, ωvar::Num; tearing::Bool=true, N::Int=1)
 end
 
 """
-    solve_sweep(prob::HarmonicProblem, base_params, sweep_pair) -> HarmonicSweepResult
+    solve_sweep(prob::HarmonicProblem, params, sweep_params) -> HarmonicSweepResult
 
 Performs a parameter sweep on the harmonic problem using zero-order continuation.
 
@@ -266,38 +266,38 @@ This function structurally simplifies the harmonic system and solves it repeated
 
 # Arguments
 - `prob::HarmonicProblem`: The harmonic problem struct created by `HarmonicProblem`.
-- `base_params`: A collection (Dict or Vector) of fixed parameter values required to fully define the system.
-- `sweep_pair`: A pair where the first element is the symbolic parameter to vary and the second is an iterable of values (e.g., `k => 0.0:0.1:5.0`).
+- `params`: A collection (Dict or Vector) of fixed parameter values required to fully define the system.
+- `sweep_params`: A pair where the first element is the symbolic parameter to vary and the second is an iterable of values (e.g., `k => 0.0:0.1:5.0`).
 
 # Returns
 - `HarmonicSweepResult`: A struct containing:
     - The swept variable name.
     - The vector of swept values.
     - A Dictionary mapping system variables (Num) to vectors of their computed values across the sweep.
-    - The original problem definition.
+  
 
 # Details
 The function automatically initializes unknown variables to `0.001` for the first solve. For subsequent steps, it uses `remake` on the `NonlinearProblem` to update parameters and initial guesses efficiently.
 """
 
-function solve_sweep(prob::HarmonicProblem, base_params, sweep_pair)
-    sweep_var = first(sweep_pair)
-    sweep_vals = last(sweep_pair)
+function solve_sweep(prob::HarmonicProblem, params, sweep_params)
+    sweep_var = first(sweep_params)
+    sweep_vals = last(sweep_params)
     sys = prob.sys
 
     # Setup Parameters
-    current_params = Dict(base_params)
+    current_params = Dict(params)
    
     
     current_params[sweep_var] = first(sweep_vals)
     
-    # Use prob.sys_vars if available, or fetch from system
+    
     system_unknowns = hasproperty(prob, :sys_vars) ? prob.sys_vars : unknowns(sys)
     
     # Initial guess
-    u0_guess = [v => 0.001 for v in system_unknowns]
+    u0_guess = [v => 0 for v in system_unknowns]
     
-    # Define Problem ONCE
+    # Define Problem 
     nl_prob = NonlinearProblem(sys, u0_guess, current_params)
     
     results = Dict{Num, Vector{Float64}}()
@@ -326,3 +326,38 @@ function solve_sweep(prob::HarmonicProblem, base_params, sweep_pair)
 
     return HarmonicSweepResult(sweep_var, collect(sweep_vals), results)
 end
+
+#----Coefficient Extraction and Plotting----
+
+function get_harmonic_coeffs(model, sweep_res, var_name::String)
+    sys_states = unknowns(model)
+
+    k = findfirst(s -> occursin(var_name, string(s)), sys_states)
+    
+    if k === nothing
+        error("Variable '$var_name' not found in system states: $sys_states")
+    end
+
+    alphabet = 'A':'Z'
+
+    #harmonic equation logic Here 
+    cos_char = alphabet[2*k - 1]
+    sin_char = alphabet[2*k]
+
+    cos_key_str = "$(cos_char)[2]" 
+    sin_key_str = "$(sin_char)[1]"
+    println("Mapping '$var_name' (System Index $k) -> Cos: $cos_key_str, Sin: $sin_key_str")
+
+    # 5. Extract Data from Results
+    res_keys = collect(keys(sweep_res.results))
+
+    key_cos = first(filter(key -> string(key) == cos_key_str, res_keys))
+    key_sin = first(filter(key -> string(key) == sin_key_str, res_keys))
+    
+    A_vec = sweep_res.results[key_cos]
+    B_vec = sweep_res.results[key_sin]
+    
+    # 6. Return Complex Phasor (A - jB)
+    return @. A_vec - im*B_vec
+end
+
