@@ -296,6 +296,7 @@ function solve_sweep(prob::HarmonicProblem, params, sweep_params)
     
     # Initial guess
     u0_guess = [v => 0 for v in system_unknowns]
+    u0_guess = [v => 0 for v in system_unknowns]
     
     # Define Problem 
     nl_prob = NonlinearProblem(sys, u0_guess, current_params)
@@ -326,38 +327,3 @@ function solve_sweep(prob::HarmonicProblem, params, sweep_params)
 
     return HarmonicSweepResult(sweep_var, collect(sweep_vals), results)
 end
-
-#----Coefficient Extraction and Plotting----
-
-function get_harmonic_coeffs(model, sweep_res, var_name::String)
-    sys_states = unknowns(model)
-
-    k = findfirst(s -> occursin(var_name, string(s)), sys_states)
-    
-    if k === nothing
-        error("Variable '$var_name' not found in system states: $sys_states")
-    end
-
-    alphabet = 'A':'Z'
-
-    #harmonic equation logic Here 
-    cos_char = alphabet[2*k - 1]
-    sin_char = alphabet[2*k]
-
-    cos_key_str = "$(cos_char)[2]" 
-    sin_key_str = "$(sin_char)[1]"
-    println("Mapping '$var_name' (System Index $k) -> Cos: $cos_key_str, Sin: $sin_key_str")
-
-    # 5. Extract Data from Results
-    res_keys = collect(keys(sweep_res.results))
-
-    key_cos = first(filter(key -> string(key) == cos_key_str, res_keys))
-    key_sin = first(filter(key -> string(key) == sin_key_str, res_keys))
-    
-    A_vec = sweep_res.results[key_cos]
-    B_vec = sweep_res.results[key_sin]
-    
-    # 6. Return Complex Phasor (A - jB)
-    return @. A_vec - im*B_vec
-end
-
