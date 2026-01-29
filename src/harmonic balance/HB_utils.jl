@@ -295,7 +295,7 @@ function solve_sweep(prob::HarmonicProblem, base_params, sweep_pair)
     system_unknowns = hasproperty(prob, :sys_vars) ? prob.sys_vars : unknowns(sys)
     
     # Initial guess
-    u0_guess = [v => 0.001 for v in system_unknowns]
+    u0_guess = [v => 0 for v in system_unknowns]
     
     # Define Problem ONCE
     nl_prob = NonlinearProblem(sys, u0_guess, current_params)
