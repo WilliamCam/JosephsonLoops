@@ -5,17 +5,16 @@ using SymbolicUtils
 struct HarmonicProblem
     sys  # The algebraic NonlinearSystem
     N::Int
-    omega::Num
-    omega_val::Float64
+    sys_vars::Vector{Num}
+    ωvar::Num
 end
 
 struct HarmonicSweepResult
     sweep_var::Num
     sweep_vals::Vector{Float64}
     results::Dict{Num, Vector{Float64}} # Maps symbolic variables to result vectors
-    prob::HarmonicProblem
+    
 end
-
 
 function var_is_in(vars::Vector, target_var::SymbolicUtils.BasicSymbolic{Real})
     ret = false
@@ -214,7 +213,7 @@ end
 
 Constructs a harmonic balance problem from a time-domain dynamical system.
 
-This function transforms a differential equation system (likely an ODESystem) into a system of nonlinear algebraic equations representing the harmonic coefficients. It automatically identifies or defines the independent variable (time) and expands the system variables into their harmonic series representations up to order $N$.
+This function transforms a differential equation system (likely an ODESystem) into a system of nonlinear algebraic equations representing the harmonic coefficients. It automatically identifies or defines the independent variable (time) and expands the system variables into their harmonic series representations up to order N
 
 # Arguments
 - `sys`: The system model (typically a `ModelingToolkit.ODESystem`) containing the differential equations.
@@ -222,41 +221,40 @@ This function transforms a differential equation system (likely an ODESystem) in
 
 # Keywords
 - `N::Int=1`: The number of harmonics to include in the expansion (truncation order). Higher values increase accuracy but increase computational cost.
-
+compile::Bool=false`: Whether to compile and tear the resulting nonlinear system for performance.
 # Returns
 - `HarmonicProblem`: A struct containing the expanded nonlinear system (`complete_sys`), the harmonic order, and the frequency definitions.
 
 # Details
 If the generated system is over-determined (more equations than variables), the function automatically truncates the equation set to match the number of unknowns.
 """
-function HarmonicProblem(sys, omega_pair::Pair; N::Int=1)
+function HarmonicProblem(sys, ωvar::Num; tearing::Bool=true, N::Int=1)
     # 1. Handle Time Variable
-    tvar = nothing
-    try
-        tvar = ModelingToolkit.get_iv(sys)
-    catch
-        @variables t
-        tvar = t
-    end
+    tvar = ModelingToolkit.get_iv(sys) #put _ in tvar and wvar
     tvar = Num(tvar)
-
-    wvar = first(omega_pair)
-    wval = last(omega_pair)
 
     eqs, states = get_full_equations(sys, tvar)
 
-    nonlinear_sys, _ = harmonic_equation(eqs, states, tvar, wvar, N)
+    nonlinear_sys, _ = harmonic_equation(eqs, states, tvar, ωvar, N) # wouldnt we need an omega value here??
     sys_eqs = equations(nonlinear_sys)
     sys_vars = unknowns(nonlinear_sys)
     
     if length(sys_eqs) > length(sys_vars)
         n_drop = length(sys_eqs) - length(sys_vars)
+         @warn "System is overdetermined: $(length(sys_eqs)) equations for $(length(sys_vars)) variables. " 
+             "Dropping the last equation(s). Caution: This behavior depends on variable order."
         sys_eqs = sys_eqs[1:end-n_drop]
     end
+        
+    @named nonlinear_sys = NonlinearSystem(sys_eqs, sys_vars, parameters(sys))
+    if tearing
+        complete_sys = mtkcompile(nonlinear_sys)
+    else 
+        complete_sys = nonlinear_sys
+    end
+  
 
-    @named complete_sys = NonlinearSystem(sys_eqs, sys_vars, parameters(sys))
-    
-    return HarmonicProblem(complete_sys, N, wvar, wval)
+    return HarmonicProblem(complete_sys,N,  unknowns(complete_sys), ωvar)
 end
 
 """
@@ -283,21 +281,24 @@ The function automatically initializes unknown variables to `0.001` for the firs
 """
 
 function solve_sweep(prob::HarmonicProblem, base_params, sweep_pair)
-    sweep_var, sweep_vals = sweep_pair
+    sweep_var = first(sweep_pair)
+    sweep_vals = last(sweep_pair)
     sys = prob.sys
-    simplesys = structural_simplify(sys)
+
     # Setup Parameters
     current_params = Dict(base_params)
-    if !haskey(current_params, prob.omega)
-         current_params[prob.omega] = prob.omega_val
-    end
+   
+    
     current_params[sweep_var] = first(sweep_vals)
     
-    system_unknowns = unknowns(simplesys)
+    # Use prob.sys_vars if available, or fetch from system
+    system_unknowns = hasproperty(prob, :sys_vars) ? prob.sys_vars : unknowns(sys)
+    
+    # Initial guess
     u0_guess = [v => 0.001 for v in system_unknowns]
     
     # Define Problem ONCE
-    nl_prob = NonlinearProblem(simplesys, u0_guess, current_params)
+    nl_prob = NonlinearProblem(sys, u0_guess, current_params)
     
     results = Dict{Num, Vector{Float64}}()
     for v in system_unknowns
@@ -306,22 +307,22 @@ function solve_sweep(prob::HarmonicProblem, base_params, sweep_pair)
     end
     
     println("Sweeping $(sweep_var) over $(length(sweep_vals)) points...")
-    local last_u = nothing
 
+    # Initialize last_u with the numeric initial guess
+    last_u = nl_prob.u0
+  
     for val in sweep_vals
-        # Continuation: Use previous result as guess
-        if last_u !== nothing
-            nl_prob = remake(nl_prob; u0 = last_u, p = [sweep_var => val])
-        else
-            nl_prob = remake(nl_prob; p = [sweep_var => val])
-        end
+        # Continuation: Update parameter and use previous solution (last_u) as guess
+        nl_prob = remake(nl_prob; u0 = last_u, p = [sweep_var => val])
         
         sol = solve(nl_prob)
         last_u = sol.u
-       
+        
+
         for (i, v) in enumerate(system_unknowns)
             push!(results[v], sol.u[i])
         end
     end
-    return HarmonicSweepResult(sweep_var, collect(sweep_vals), results, prob)
+
+    return HarmonicSweepResult(sweep_var, collect(sweep_vals), results)
 end

@@ -30,16 +30,22 @@ Ic = 1e-6
 Φ₀ = 2.067833848e-15
 
 #hb setup
-println("Setting up Harmonic Problem...")
-h_prob = HarmonicProblem(model, jls.P1.Isrc.ω => 4.5e9*2*pi; N=1)
 
+h_prob = HarmonicProblem(model, jls.P1.Isrc.ω; N=1, tearing = true)
+
+# --- 4. Frequency Sweep ---
+# Define the sweep range (4.5 to 5.0 GHz)
 ω_vec = 2*pi*(4.5:0.001:5.0)*1e9
 
+# Create a copy of parameters for the sweep
 sweep_params = copy(ps)
-sweep_params[jls.P1.Isrc.I] = 0.00565e-6
-sweep_params[jls.J1.R] = 1e9 
+sweep_params[jls.P1.Isrc.I] = 0.00565e-6 # Specific current for this test
+sweep_params[jls.J1.R] = 1e9             # High resistance (open circuit approximation)
+
 
 println("Running Frequency Sweep...")
+
+# UPDATED CALL: Matches `solve_sweep(prob, base_params, sweep_pair)`
 sweep_res = solve_sweep(h_prob, sweep_params, jls.P1.Isrc.ω => ω_vec)
 
 
@@ -53,7 +59,6 @@ find_var(name) = first(filter(v -> occursin(name, string(v)), sys_vars))
 
 # Extract Phase Coefficients (A=Cos, B=Sin) for N=1
 # A[2] corresponds to Cos(wt), B[1] corresponds to Sin(wt)
-
 A_fund = sweep_res.results[find_var("A[2]")] 
 B_fund = sweep_res.results[find_var("B[1]")] 
 
