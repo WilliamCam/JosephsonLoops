@@ -222,7 +222,7 @@ function HarmonicProblem(sys, ωvar::Num; tearing::Bool=true, N::Int=1)
 end
 
 """
-    solve_sweep(prob::HarmonicProblem, params, sweep_params) -> HarmonicSweepResult
+    solve(prob::HarmonicProblem, params, sweep_params) -> HarmonicSweepResult
 
 Performs a parameter sweep on the harmonic problem using zero-order continuation.
 
@@ -245,7 +245,7 @@ step as the initial guess for the current step to ensure convergence along the s
 The function automatically initializes unknown variables to `0.001` for the first solve. For subsequent steps, it uses `remake` on the `NonlinearProblem` to update parameters and initial guesses efficiently.
 """
 
-function solve_sweep(prob::HarmonicProblem, params, sweep_params)
+function solve(prob::HarmonicProblem, params, sweep_params)
     sweep_var = first(sweep_params)
     sweep_vals = last(sweep_params)
     sys = prob.sys
