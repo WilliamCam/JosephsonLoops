@@ -12,8 +12,8 @@ circuit = jls.process_netlist(loops)
 #cirucit model ODAE system and initial condition vector are created.
 model, u0, guesses = jls.build_circuit(circuit)
 
-# we set the values of circuit parameters, for any parameters not specified; default values will be assigned.
-    ps = [
+# we set the values `of circuit parameters, for any parameters not specified; default values will be assigned.
+ ps = [
         jls.P1.ω => 100e6*2*pi
         jls.P1.I => 1e-12
         jls.P1.Rport.R => 50.0
@@ -43,7 +43,7 @@ jls.tplot(sol, jls.C1, units = "amps")
 #Harmonic Balance
 using ModelingToolkit
 eqs, states = jls.get_full_equations(model, jls.t)
-
+ 
 harmonic_system, harmonic_states = jls.harmonic_equation(eqs, states, jls.t, jls.P1.Isrc.ω, 1)
 
 heqs = harmonic_system[1:end-1]
@@ -56,7 +56,7 @@ sys =  mtkcompile(ns)
 ns
 
 
-sI₀ = 1e-6
+I₀ = 1e-6
 R₀ = 50.0
 Id = 0.05e-6
 ωc = sqrt(2*pi *I₀/(jls.Φ₀*1000.0e-15))/(2*pi)
@@ -86,16 +86,17 @@ for i in 1:1:length(ω_vec)
     push!(solution1,  sqrt(sol[ns.E[2]]^2+sol[ns.F[1]]^2))
     push!(solution2,  sqrt(sol[ns.G[2]]^2+sol[ns.H[1]]^2))
 end
+
+ω_vec, solution1, solution2 = @time hbsweep(sys, jls,  ns)
 using Plots
-
-
 Ii = @. abs(0.00565e-6 - (solution1))
 Vi = @. abs(jls.Φ₀/(2*pi)*solution2)
 
 ai = 0.5*(Vi+50.0*Ii)/sqrt(50.0)
 bi = 0.5*(Vi-50.0*(Ii))/sqrt(50.0)
 
-plot(ω_vec/(2*pi), (bi./ai))
+p = plot(ω_vec/(2*pi), (bi./ai))
+display(p)
 
 #Linear Analysis
 

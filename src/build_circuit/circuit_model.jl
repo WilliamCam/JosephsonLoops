@@ -26,6 +26,8 @@ struct CircuitNetlist
     branches::Vector{String}
 end
 
+
+
 function find_components(loops::Vector{Vector{String}})
     numLoops = size(loops)[1]                      
     component_loop_mapping = Dict{String, Vector{Int}}()
