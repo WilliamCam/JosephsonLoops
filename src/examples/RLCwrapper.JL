@@ -36,7 +36,7 @@ Ic = 1e-6
 #hb Setup
 #ask will how he set up includes/ throwing compilation error here when i try to include HB files separately or from Josephson Loops
 
-h_prob = HarmonicProblem(model, jls.P1.Isrc.ω; N=1, tearing = true)
+h_prob = jls.HarmonicProblem(model, jls.P1.Isrc.ω; N=1, tearing = true)
 
 # --- 4. Frequency Sweep ---
 # Define the sweep range (4.5 to 5.0 GHz)
@@ -48,18 +48,18 @@ sweep_params[jls.P1.Isrc.I] = 0.00565e-6 # Specific current for this test
 
 sweep_params[jls.J1.R] = 1e9             # High resistance (open circuit approximation)
 # Solve the harmonic balance problem over the frequency sweep
-sweep_res = solve_sweep(h_prob, sweep_params, jls.P1.Isrc.ω => ω_vec)
+sweep_res = jls.solve_sweep(h_prob, sweep_params, jls.P1.Isrc.ω => ω_vec)
 
 
 
 
 #Testing and debugging as of now. Able to get P1, C1 , J1 but not P.Rsrc.i 
 
-current_p = get_harmonic_coeffs(h_prob, model, sweep_res, ps, "P1₊i")
-thetap = get_harmonic_coeffs(h_prob, model, sweep_res, ps, "P1₊dθ")
+current_p = jls.get_harmonic_coeffs(h_prob, model, sweep_res, ps, "P1₊i")
+thetap = jls.get_harmonic_coeffs(h_prob, model, sweep_res, ps, "P1₊dθ")
 
 
-phase = get_harmonic_phase(h_prob, model, sweep_res, ps, "P1")
+phase = jls.get_harmonic_phase(h_prob, model, sweep_res, ps, "P1")
 
 # solution1 = get_harmonic_coeffs(h_prob, model, sweep_res, ps, "P1")
 # solution2 = get_harmonic_coeffs(h_prob, model, sweep_res, ps, "C1")

@@ -451,7 +451,7 @@ This function maps a physical variable name (e.g., "position") to its correspond
 # Returns
 - `Vector{ComplexF64}`: A vector of complex numbers representing the harmonic coefficient for each point in the sweep.
 """
-function get_harmonic_coeffs(h_prob::HarmonicProblem , model, sweep_res, params, var_name::String)
+function get_harmonic_coeffs(h_prob::HarmonicProblem, model, sweep_res, params, var_name::String)
 
     # 1. Map Physical Name -> Harmonic Keys
     sys_states = unknowns(model)
