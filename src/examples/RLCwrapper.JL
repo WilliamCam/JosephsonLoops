@@ -31,6 +31,8 @@ Ic = 1e-6
 #time domain simulation wrapper updates- todo
 #linear analysis wrapper - todo
 
+
+
 #hb Setup
 #ask will how he set up includes/ throwing compilation error here when i try to include HB files separately or from Josephson Loops
 
@@ -53,16 +55,18 @@ sweep_res = solve_sweep(h_prob, sweep_params, jls.P1.Isrc.ω => ω_vec)
 
 #Testing and debugging as of now. Able to get P1, C1 , J1 but not P.Rsrc.i 
 
-thetac = get_harmonic_coeffs(h_prob, model, sweep_res, ps, "P1")
+current_p = get_harmonic_coeffs(h_prob, model, sweep_res, ps, "P1₊i")
+thetap = get_harmonic_coeffs(h_prob, model, sweep_res, ps, "P1₊dθ")
+
 
 phase = get_harmonic_phase(h_prob, model, sweep_res, ps, "P1")
 
 # solution1 = get_harmonic_coeffs(h_prob, model, sweep_res, ps, "P1")
 # solution2 = get_harmonic_coeffs(h_prob, model, sweep_res, ps, "C1")
 
-Ii = @. abs(0.00565e-6 - thetac)
+Ii = @. abs(0.00565e-6 - current_p)
 
-Vi = @. abs(jls.Φ₀ / (2*pi) * phase) 
+Vi = @. abs(jls.Φ₀ / (2*pi) * thetap) 
 
 # Calculate Power Waves (a = incident, b = reflected)
 Z0 = 50.0
