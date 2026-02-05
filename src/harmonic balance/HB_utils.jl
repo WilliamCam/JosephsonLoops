@@ -1,19 +1,27 @@
 using Symbolics
 using SymbolicUtils
-
+using NonlinearSolve
 
 struct HarmonicProblem
     sys  # The algebraic NonlinearSystem
     N::Int
     sys_vars::Vector{Num}
     ωvar::Num
+    params::Dict
+    variable_map::Dict{Tuple{String, Int, Symbol}, Num}
+    observed::Vector{Equation}
+end
+
+struct HarmonicSweepProblem
+    prob::HarmonicProblem
+    sweep_var::Num
+    sweep_vals::AbstractVector
 end
 
 struct HarmonicSweepResult
     sweep_var::Num
-    sweep_vals::Vector{Float64}
+    sweep_vals::AbstractVector
     results::Dict{Num, Vector{Float64}} # Maps symbolic variables to result vectors
-    
 end
 
 function var_is_in(vars::Vector, target_var::SymbolicUtils.BasicSymbolic{Real})
@@ -192,14 +200,14 @@ compile::Bool=false`: Whether to compile and tear the resulting nonlinear system
 # Details
 If the generated system is over-determined (more equations than variables), the function automatically truncates the equation set to match the number of unknowns.
 """
-function HarmonicProblem(sys, ωvar::Num; tearing::Bool=true, N::Int=1)
+function HarmonicProblem(sys, ωvar::Num, params; tearing::Bool=true, N::Int=1) #jac::Bool=false)
     # 1. Handle Time Variable
-    tvar = ModelingToolkit.get_iv(sys) #put _ in tvar and wvar
+    tvar = ModelingToolkit.get_iv(sys) #put _ in tvar and wvars
     tvar = Num(tvar)
 
     eqs, states = get_full_equations(sys, tvar)
 
-    nonlinear_sys, _ = harmonic_equation(eqs, states, tvar, ωvar, N) 
+    nonlinear_sys, _, variable_map = harmonic_equation(eqs, states, tvar, ωvar, N) 
     sys_eqs = equations(nonlinear_sys)
     sys_vars = unknowns(nonlinear_sys)
     
@@ -218,81 +226,387 @@ function HarmonicProblem(sys, ωvar::Num; tearing::Bool=true, N::Int=1)
     end
   
 
-    return HarmonicProblem(complete_sys,N,  unknowns(complete_sys), ωvar)
+    return HarmonicProblem(complete_sys, N, unknowns(complete_sys), ωvar, params, variable_map, observed(sys))
 end
 
-"""
-    solve_sweep(prob::HarmonicProblem, params, sweep_params) -> HarmonicSweepResult
 
-Performs a parameter sweep on the harmonic problem using zero-order continuation.
 
-This function structurally simplifies the harmonic system and solves it repeatedly across a range of parameter values. It uses the solution from the previous 
-step as the initial guess for the current step to ensure convergence along the solution branch.
+function solve(prob::HarmonicProblem)
+    u0_guess = fill(0.0, length(prob.sys_vars))
+    current_params = prob.params
+    #to remove deprecated error from NonlinearProblem, we have to pass merge(dict, u0)
+    combined_args = merge(Dict(prob.sys_vars .=> u0_guess), current_params)
+    nl_prob = NonlinearProblem(prob.sys, combined_args)
+    return ModelingToolkit.solve(nl_prob)
+end
 
-# Arguments
-- `prob::HarmonicProblem`: The harmonic problem struct created by `HarmonicProblem`.
-- `params`: A collection (Dict or Vector) of fixed parameter values required to fully define the system.
-- `sweep_params`: A pair where the first element is the symbolic parameter to vary and the second is an iterable of values (e.g., `k => 0.0:0.1:5.0`).
-
-# Returns
-- `HarmonicSweepResult`: A struct containing:
-    - The swept variable name.
-    - The vector of swept values.
-    - A Dictionary mapping system variables (Num) to vectors of their computed values across the sweep.
-  
-
-# Details
-The function automatically initializes unknown variables to `0.001` for the first solve. For subsequent steps, it uses `remake` on the `NonlinearProblem` to update parameters and initial guesses efficiently.
-"""
-
-function solve_sweep(prob::HarmonicProblem, params, sweep_params)
-    sweep_var = first(sweep_params)
-    sweep_vals = last(sweep_params)
+function solve(sweepprob::HarmonicSweepProblem)
+    prob = sweepprob.prob
+    sweep_var = sweepprob.sweep_var
+    sweep_vals = sweepprob.sweep_vals
     sys = prob.sys
 
     # Setup Parameters
-    current_params = Dict(params)
+    current_params = copy(prob.params)
    
-    
     current_params[sweep_var] = first(sweep_vals)
     
     
-    system_unknowns = hasproperty(prob, :sys_vars) ? prob.sys_vars : unknowns(sys)
+    system_unknowns = prob.sys_vars
     
     # Initial guess
-    u0_guess = [v => 0 for v in system_unknowns]
-    u0_guess = [v => 0 for v in system_unknowns]
-    
-    # Define Problem 
-    nl_prob = NonlinearProblem(sys, u0_guess, current_params)
+    u0_guess = fill(0.0, length(prob.sys_vars))
+
+    # Define Problem - got rid of deprecated error
+    combined_args = merge(Dict(prob.sys_vars .=> u0_guess), current_params)
+    nl_prob = NonlinearProblem(sys, combined_args)
     
     results = Dict{Num, Vector{Float64}}()
     for v in system_unknowns
         results[v] = Float64[]
         sizehint!(results[v], length(sweep_vals))
     end
-    
     println("Sweeping $(sweep_var) over $(length(sweep_vals)) points...")
-
     # Initialize last_u with the numeric initial guess
     last_u = nl_prob.u0
   
-    for val in sweep_vals
-        # Continuation: Update parameter and use previous solution (last_u) as guess
+    for  val in sweep_vals     
+        # Continuation: use previous solution (last_u)
         nl_prob = remake(nl_prob; u0 = last_u, p = [sweep_var => val])
-        
-        sol = solve(nl_prob)
+        sol = ModelingToolkit.solve(nl_prob)
         last_u = sol.u
-        
-
-        for (i, v) in enumerate(system_unknowns)
+        for (i, v) in enumerate(prob.sys_vars)
             push!(results[v], sol.u[i])
         end
     end
-
     return HarmonicSweepResult(sweep_var, collect(sweep_vals), results)
 end
 
+
+"""
+    get_harmonic(h_prob::HarmonicProblem, sweep_res, var_name::String, order::Int; output_type::Symbol=:complex)
+
+Extracts harmonic components. Checks variable_map first, then falls back to observed equations.
+output_type: :complex (default), :magnitude, :phase
+"""
+function get_harmonic(h_prob::HarmonicProblem, sweep_res, var_name::String, order::Int; output_type::Symbol=:complex)
+    
+    # Build observed dict from harmonic system (for vars like D, E, F that are in terms of A, B, C)
+    obs_dict = Dict(string(eq.lhs) => eq.rhs for eq in observed(h_prob.sys))
+    params = h_prob.params
+
+    # Try to get from variable_map first
+    if order == 0
+        key = (var_name, 0, :Cos)
+        if haskey(h_prob.variable_map, key)
+            sym = h_prob.variable_map[key]
+            val_vec = fetch_harmonic_vector(string(sym), h_prob, sweep_res, params, obs_dict)
+            phasor = complex.(val_vec)
+        else
+            # Not in map - must be an observed variable from original system
+            # Try to find it in the time-domain observed equations (h_prob.observed)
+            phasor = complex.(reconstruct_from_observed(h_prob, sweep_res, var_name, 0, :Cos))
+        end
+    else
+        key_cos = (var_name, order, :Cos)
+        key_sin = (var_name, order, :Sin)
+        
+        if haskey(h_prob.variable_map, key_cos) && haskey(h_prob.variable_map, key_sin)
+            sym_cos = h_prob.variable_map[key_cos]
+            sym_sin = h_prob.variable_map[key_sin]
+            
+            A_vec = fetch_harmonic_vector(string(sym_cos), h_prob, sweep_res, params, obs_dict)
+            B_vec = fetch_harmonic_vector(string(sym_sin), h_prob, sweep_res, params, obs_dict)
+            
+            phasor = @. (A_vec - im*B_vec)
+        else
+            # Not in map - reconstruct from time-domain observed
+            A_vec = reconstruct_from_observed(h_prob, sweep_res, var_name, order, :Cos)
+            B_vec = reconstruct_from_observed(h_prob, sweep_res, var_name, order, :Sin)
+            phasor = @. (A_vec - im*B_vec)
+        end
+    end
+
+    if output_type == :magnitude
+        return abs.(phasor)
+    elseif output_type == :phase
+        return angle.(phasor)
+    else
+        return phasor
+    end
+end
+"""
+    fetch_harmonic_vector(target_key::String, h_prob::HarmonicProblem, sweep_res, params, obs_dict, known_vars)
+
+Retrieves the data vector for a specific harmonic variable, checking both direct results and observed equations.
+
+The function attempts to resolve the `target_key` in the following order:
+1. Checks if `target_key` exists directly in `sweep_res.results`.
+2. If not found, checks `obs_dict` (observed variables). If found, it flattens the observed equation, compiles it into a function, and evaluates it across the sweep.
+3. If the key is not found in either, returns a vector of zeros.
+
+# Arguments
+- `target_key::String`: The name or substring of the variable to retrieve (e.g., "u", "sys₊u").
+- `h_prob`: The `HarmonicProblem` context.
+- `sweep_res`: The simulation sweep results.
+- `params`: Base parameter values.
+- `obs_dict`: Dictionary of observed equations.
+- `known_vars`: Set of fundamental system variables.
+
+# Returns
+- `Vector{Float64}`: The numerical values of the target variable across the sweep.
+"""
+
+
+function fetch_harmonic_vector(target_key::String, h_prob::HarmonicProblem, sweep_res, params, obs_dict)
+    
+    # A. Check Results (Fast Path)
+    res_keys = collect(keys(sweep_res.results))
+    res_idx = findfirst(k -> occursin(target_key, string(k)), res_keys)
+    if res_idx !== nothing
+        return sweep_res.results[res_keys[res_idx]]
+    end
+
+    # B. Check Observed Equations (Slow Path)
+    # FIX: Collect keys into a Vector so 'findfirst' works
+    obs_keys = collect(keys(obs_dict))
+    match_idx = findfirst(k -> occursin(target_key, k), obs_keys)
+    
+    if match_idx !== nothing
+        key = obs_keys[match_idx]
+        
+        # Get RHS (already in harmonic form)
+        raw_rhs = obs_dict[key]
+        
+        # Check if expression contains unknown harmonic coefficients (like G[1])
+        vars_in_rhs = Symbolics.get_variables(raw_rhs)
+        known_syms = Set(h_prob.sys_vars)
+        param_syms = Set(parameters(h_prob.sys))
+        
+        unknown_vars = filter(v -> v ∉ known_syms && v ∉ param_syms, vars_in_rhs)
+        
+        if !isempty(unknown_vars)
+            # Recursively substitute unknown harmonic coefficients
+            for _ in 1:10
+                vars_in_expr = Symbolics.get_variables(raw_rhs)
+                unknowns = filter(v -> v ∉ known_syms && v ∉ param_syms, vars_in_expr)
+                
+                if isempty(unknowns)
+                    break
+                end
+                
+                subs_dict = Dict()
+                for u in unknowns
+                    u_str = string(u)
+                    if haskey(obs_dict, u_str)
+                        subs_dict[u] = obs_dict[u_str]
+                    end
+                end
+                
+                if isempty(subs_dict)
+                    break
+                end
+                
+                raw_rhs = substitute(raw_rhs, subs_dict)
+                raw_rhs = Symbolics.simplify(raw_rhs)
+            end
+        end
+        
+        # Compile Function
+        func_ex = build_function(raw_rhs, h_prob.sys_vars, parameters(h_prob.sys), expression=Val{true})
+        func = eval(func_ex)
+        
+        # Evaluate
+        return evaluate_harmonic_sweep(func, h_prob, sweep_res, params)
+    end
+
+    # C. Not Found (Assume 0.0)
+    return zeros(Float64, length(sweep_res.sweep_vals))
+end
+
+
+"""
+    reconstruct_from_observed(h_prob, sweep_res, var_name, order, component)
+
+Reconstructs a harmonic component from time-domain observed equations.
+This is used for variables like C1₊i that are observed in the original system
+but not included in the harmonic variable_map after tearing.
+"""
+
+function reconstruct_from_observed(h_prob::HarmonicProblem, sweep_res, var_name::String, order::Int, component::Symbol)
+    # Find the observed equation for this variable in the original (time-domain) system
+    target_eq = nothing
+    for eq in h_prob.observed
+        lhs_str = string(eq.lhs)
+        # Match "C1₊i(t)" to "C1₊i"
+        if replace(lhs_str, "(t)" => "") == var_name
+            target_eq = eq
+            break
+        end
+    end
+    
+    if target_eq === nothing
+        error("Variable $var_name not found in variable_map or observed equations")
+    end
+    
+    # Extract time variable
+    rhs_expr = target_eq.rhs
+    lhs_term = first(Symbolics.get_variables(target_eq.lhs))
+    tvar = Symbolics.arguments(Symbolics.unwrap(lhs_term))[1]
+    
+    # First, recursively substitute any observed variable dependencies (e.g., J1₊i in C1₊i equation)
+    obs_dict = Dict(replace(string(eq.lhs), "(t)" => "") => eq.rhs for eq in h_prob.observed)
+    
+    # Recursively expand observed dependencies including their derivatives
+    for _ in 1:10
+        vars_in_rhs = Symbolics.get_variables(rhs_expr)
+        has_obs = false
+        obs_subs = Dict()
+        
+        for v in vars_in_rhs
+            v_name = replace(string(v), "(t)" => "")
+            if haskey(obs_dict, v_name)
+                # Only substitute the base variable - let state substitution handle derivatives
+                obs_subs[v] = obs_dict[v_name]
+                has_obs = true
+            end
+        end
+        
+        if !has_obs
+            break
+        end
+        
+        # Just substitute, don't expand derivatives yet
+        rhs_expr = substitute(rhs_expr, obs_subs)
+    end
+    
+    N = h_prob.N
+    ωvar = h_prob.ωvar
+    
+    # Build substitution map: state_var(t) => harmonic expansion
+    state_subs = Dict()
+    
+    # Group harmonic coefficients by state variable name
+    grouped_vars = Dict{String, Dict}()
+    for (key, sym) in h_prob.variable_map
+        (name, n, type) = key
+        if !haskey(grouped_vars, name)
+            grouped_vars[name] = Dict()
+        end
+        grouped_vars[name][(n, type)] = sym
+    end
+    
+    # For each state variable,  build its harmonic expansion
+    for (name, coeffs) in grouped_vars
+        A0 = get(coeffs, (0, :Cos), 0.0)
+        
+        expand_expr = A0
+        dX_expr = 0
+        d2X_expr = 0
+        
+        for n in 1:N
+            An = get(coeffs, (n, :Cos), 0.0)
+            Bn = get(coeffs, (n, :Sin), 0.0)
+            
+            phase = n * ωvar * tvar
+            expand_expr += An * cos(phase) + Bn * sin(phase)
+            dX_expr += -An * n * ωvar * sin(phase) + Bn * n * ωvar * cos(phase)
+            d2X_expr += -An * (n*ωvar)^2 * cos(phase) - Bn * (n*ωvar)^2 * sin(phase)
+        end
+        
+        # Find matching variable in rhs_expr and substitute
+        vars_in_rhs = Symbolics.get_variables(rhs_expr)
+        for v in vars_in_rhs
+            v_str = replace(string(v), "(t)" => "")
+            
+            # Match base variable (e.g., "J1₊θ" or "sys₊J1₊θ")
+            if v_str == name || endswith(v_str, "₊"*name)
+                state_subs[v] = expand_expr
+                state_subs[Differential(tvar)(v)] = dX_expr
+                state_subs[Differential(tvar)(Differential(tvar)(v))] = d2X_expr
+            # Match derivative notation (e.g., "J1₊θˍt" represents D(J1₊θ))
+            elseif v_str == name * "ˍt" || endswith(v_str, "₊" * name * "ˍt")
+                state_subs[v] = dX_expr
+            end
+        end
+    end
+    
+    # Substitute state expansions into observed equation
+    expanded_rhs = substitute(rhs_expr, state_subs)
+    
+    # Expand any remaining derivatives (from the state substitutions)
+    # Use multiple passes to ensure all nested derivatives are expanded
+    for _ in 1:3
+        expanded_rhs = Symbolics.expand_derivatives(expanded_rhs)
+        expanded_rhs = Symbolics.simplify(expanded_rhs)
+    end
+    
+    # Extract harmonic component via DFT
+    Nt = 2*N+1
+    dft_val = 0
+    for k in 0:(Nt-1)
+        phi_k = 2*pi*k/Nt
+        val_k = substitute(expanded_rhs, Dict(tvar => phi_k / ωvar))
+        
+        if component == :Cos && order == 0
+            dft_val += val_k
+        elseif component == :Cos
+            dft_val += val_k * cos(order * phi_k)
+        elseif component == :Sin
+            dft_val += val_k * sin(order * phi_k)
+        end
+    end
+    
+    factor = (order == 0) ? (1/Nt) : (2/Nt)
+    final_expr = dft_val * factor
+    
+    # Check if expression contains harmonic coefficients from observed equations (like D[1])
+    vars_in_final = Symbolics.get_variables(final_expr)
+    known_syms = Set(h_prob.sys_vars)
+    param_syms = Set(parameters(h_prob.sys))
+    
+    # Find unknown variables (harmonic coefficients from observed equations)
+    unknown_vars = filter(v -> v ∉ known_syms && v ∉ param_syms, vars_in_final)
+    
+    if !isempty(unknown_vars)
+        
+        # Build observed dict from harmonic system
+        obs_dict = Dict(string(eq.lhs) => eq.rhs for eq in observed(h_prob.sys))
+        
+        # Recursively substitute unknown harmonic coefficients
+        for _ in 1:10
+            vars_in_expr = Symbolics.get_variables(final_expr)
+            unknowns = filter(v -> v ∉ known_syms && v ∉ param_syms, vars_in_expr)
+            
+            if isempty(unknowns)
+                break
+            end
+            
+            subs_dict = Dict()
+            for u in unknowns
+                u_str = string(u)
+                if haskey(obs_dict, u_str)
+                    subs_dict[u] = obs_dict[u_str]
+                end
+            end
+            
+            if isempty(subs_dict)
+                break
+            end
+            
+            final_expr = substitute(final_expr, subs_dict)
+            final_expr = Symbolics.simplify(final_expr)
+        end
+    end
+    
+
+    
+    # Compile and evaluate
+    func_ex = build_function(final_expr, h_prob.sys_vars, parameters(h_prob.sys), expression=Val{true})
+    func = eval(func_ex)
+    
+    return evaluate_harmonic_sweep(func, h_prob, sweep_res, h_prob.params)
+end
 
 """
     flatten_harmonic_equation(expr, obs_dict::Dict, known_vars::Set{String})
@@ -310,7 +624,7 @@ This function resolves dependency chains (e.g., `F` depends on `D`, `D` depends 
 - A symbolic expression containing only variables found in `known_vars` (or constants).
 """
 
-#  Recursively resolves observed variables (e.g. F -> D -> A)
+
 
 function flatten_harmonic_equation(expr, obs_dict::Dict, known_vars::Set{String})
     current_expr = expr
@@ -377,128 +691,3 @@ function evaluate_harmonic_sweep(func, h_prob, sweep_res, params)
     return out_vals
 end
 
-"""
-    fetch_harmonic_vector(target_key::String, h_prob::HarmonicProblem, sweep_res, params, obs_dict, known_vars)
-
-Retrieves the data vector for a specific harmonic variable, checking both direct results and observed equations.
-
-The function attempts to resolve the `target_key` in the following order:
-1. Checks if `target_key` exists directly in `sweep_res.results`.
-2. If not found, checks `obs_dict` (observed variables). If found, it flattens the observed equation, compiles it into a function, and evaluates it across the sweep.
-3. If the key is not found in either, returns a vector of zeros.
-
-# Arguments
-- `target_key::String`: The name or substring of the variable to retrieve (e.g., "u", "sys₊u").
-- `h_prob`: The `HarmonicProblem` context.
-- `sweep_res`: The simulation sweep results.
-- `params`: Base parameter values.
-- `obs_dict`: Dictionary of observed equations.
-- `known_vars`: Set of fundamental system variables.
-
-# Returns
-- `Vector{Float64}`: The numerical values of the target variable across the sweep.
-"""
-#currently not returning all variables from observed equations i think?
-
-function fetch_harmonic_vector(target_key::String, h_prob::HarmonicProblem, sweep_res, params, obs_dict, known_vars)
-    
-    # A. Check Results (Fast Path)
-    res_keys = collect(keys(sweep_res.results))
-    res_idx = findfirst(k -> occursin(target_key, string(k)), res_keys)
-    if res_idx !== nothing
-        return sweep_res.results[res_keys[res_idx]]
-    end
-
-    # B. Check Observed Equations (Slow Path)
-    # FIX: Collect keys into a Vector so 'findfirst' works
-    obs_keys = collect(keys(obs_dict))
-    match_idx = findfirst(k -> occursin(target_key, k), obs_keys)
-    
-    if match_idx !== nothing
-        key = obs_keys[match_idx]
-        
-        # 1. Get RHS and Flatten
-        raw_rhs = obs_dict[key]
-        flat_rhs = flatten_harmonic_equation(raw_rhs, obs_dict, known_vars)
-        
-        # 2. Compile Function (Val{true} returns an expression we can eval)
-        func_ex = build_function(flat_rhs, h_prob.sys_vars, parameters(h_prob.sys), expression=Val{true})
-        func = eval(func_ex)
-        
-        # 3. Evaluate safely
-        return evaluate_harmonic_sweep(func, h_prob, sweep_res, params)
-    end
-
-    # C. Not Found (Assume 0.0)
-    return zeros(Float64, length(sweep_res.sweep_vals))
-end
-
-
-"""
-    get_harmonic_coeffs(h_prob::HarmonicProblem, model, sweep_res, params, var_name::String)
-
-Extracts and computes the complex harmonic coefficients for a specific physical variable.
-
-This function maps a physical variable name (e.g., "position") to its corresponding harmonic components (Cos/Sin terms) based on the variable's index in the system. It retrieves these components from the results or observed equations and combines them into a complex phasor.
-
-# Arguments
-- `h_prob::HarmonicProblem`: The problem definition containing the system structure.
-- `model`: The symbolic model (usually ODESystem) defining unknowns.
-- `sweep_res`: The output data from the parameter sweep.
-- `params`: Parameter values for evaluation.
-- `var_name::String`: The string representation of the physical variable to query (e.g., "x").
-
-# Returns
-- `Vector{ComplexF64}`: A vector of complex numbers representing the harmonic coefficient for each point in the sweep.
-"""
-function get_harmonic_coeffs(h_prob::HarmonicProblem , model, sweep_res, params, var_name::String)
-
-    # 1. Map Physical Name -> Harmonic Keys
-    sys_states = unknowns(model)
-    k = findfirst(s -> occursin(var_name, string(s)), sys_states)
-    if k === nothing; error("Variable '$var_name' not found."); end
-
-    alphabet = 'A':'Z'
-    cos_key = "$(alphabet[2*k - 1])[2]"
-    sin_key = "$(alphabet[2*k])[1]"
-    
-    println("Variable '$var_name' (Index $k) maps to Harmonic Vars: $cos_key, $sin_key")
-
-    # 2. Prepare Lookup Data
-    obs_dict = Dict(string(eq.lhs) => eq.rhs for eq in observed(h_prob.sys))
-    known_vars = Set(string.([h_prob.sys_vars; parameters(h_prob.sys)]))
-    
-    # 3. Fetch Components
-    A_vec = fetch_harmonic_vector(cos_key, h_prob, sweep_res, params, obs_dict, known_vars)
-    B_vec = fetch_harmonic_vector(sin_key, h_prob, sweep_res, params, obs_dict, known_vars)
-
-    return @. A_vec - im*B_vec
-end
-
-
-#double check formulas with will 
-
-"""
-    get_harmonic_magnitude(h_prob, model, sweep_res, params, var_name)
-
-Wrapper that gets the complex phasor and returns its Peak Magnitude.
-Magnitude = sqrt(A^2 + B^2)
-"""
-function get_harmonic_magnitude(h_prob, model, sweep_res, params, var_name::String)
-    # 1. Get the complex phasor (A - iB)
-    phasor = get_harmonic_coeffs(h_prob, model, sweep_res, params, var_name)
-    
-    # 2. Return Magnitude (Element-wise)
-    return abs.(phasor)
-end
-
-"""
-    get_harmonic_phase(h_prob, model, sweep_res, params, var_name)
-
-Wrapper that gets the complex phasor and returns its Phase in Radians.
-Phase = atan(-B / A)
-"""
-function get_harmonic_phase(h_prob, model, sweep_res, params, var_name::String)
-    phasor = get_harmonic_coeffs(h_prob, model, sweep_res, params, var_name)
-    return angle.(phasor)
-end

@@ -1,7 +1,7 @@
 module JosephsonLoops
 
 #Specific packages loading for reduce precompilation time
-using ModelingToolkit, Plots, DifferentialEquations, Symbolics, DataStructures, LinearAlgebra
+using ModelingToolkit, Plots, DifferentialEquations, Symbolics, DataStructures, LinearAlgebra, NonlinearSolve
 
 #Internal API
 include("build_circuit/component_library.jl")

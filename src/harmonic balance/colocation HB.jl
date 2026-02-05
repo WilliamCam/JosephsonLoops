@@ -1,6 +1,5 @@
 using Symbolics
 using SymbolicUtils
-using ModelingToolkit
 using QuestBase
 
 
@@ -50,19 +49,37 @@ function harmonic_equation(eqs, states, tvar, wvar, N; jac=false)
         vars = []
     end
     # loop over each state varibale for multiple harmonic equations
+    variable_map = Dict{Tuple{String, Int, Symbol}, Num}()
+
     for k in 1:M
         cos_coeff_labels, sin_coeff_labels = Symbol(coeff_labels[2*k-1]), Symbol(coeff_labels[2*k])
         cos_coeffs = @variables $cos_coeff_labels[1:N+1]
         sin_coeffs = @variables $sin_coeff_labels[1:N]
-        harmonic_state = harmonic_solution(N, tvar, wvar, cos_coeffs[1], sin_coeffs[1])
+        
+        # Populate variable map 
+        actual_cos = cos_coeffs[1]
+        actual_sin = sin_coeffs[1]
+        var_name = replace(string(states[k]), "(t)" => "")
+        #Dc
+        variable_map[(var_name, 0, :Cos)] = actual_cos[1]
+        #Ac
+        for n in 1:N
+            variable_map[(var_name, n, :Cos)] = actual_cos[n+1]
+            variable_map[(var_name, n, :Sin)] = actual_sin[n]
+        end
+
+        harmonic_state = harmonic_solution(N, tvar, wvar, actual_cos, actual_sin)
         #Linearisation via jacobian requires introduction of derivative harmonic variables i.e. A[1]'
         if jac
             d_cos_coeff_labels, d_sin_coeff_labels = Symbol('d' * coeff_labels[2*k-1]), Symbol('d' * coeff_labels[2*k])
             d_cos_coeffs = @variables $d_cos_coeff_labels[1:N+1]
             d_sin_coeffs = @variables $d_sin_coeff_labels[1:N]
 
-            _, _dXdt, _d2Xdt2, _vars, _dvars = harmonic_solution(N, tvar, wvar, cos_coeffs[1], sin_coeffs[1], 
-                get_derivatives=true, dAfourier = d_cos_coeffs[1], dBfourier = d_sin_coeffs[1]
+            actual_dcos = d_cos_coeffs[1]
+            actual_dsin = d_sin_coeffs[1]
+
+            _, _dXdt, _d2Xdt2, _vars, _dvars = harmonic_solution(N, tvar, wvar, actual_cos, actual_sin, 
+                get_derivatives=true, dAfourier = actual_dcos, dBfourier = actual_dsin
             )
       
             d_harmonic_eqs = substitute(harmonic_eqs, Dict(
@@ -108,9 +125,9 @@ function harmonic_equation(eqs, states, tvar, wvar, N; jac=false)
         rotated_system = rotate_to_harmonic_frame(N, Nt, d_harmonic_system)
         #TODO: Check orderiing for M>1 larger systems
         J0, J1 = build_jacobians(rotated_system, vars, dvars) 
-        return sys, X, (J0, J1);
+        return sys, X, variable_map, (J0, J1);
     else
-        return sys, X
+        return sys, X, variable_map
     end
 end
 
