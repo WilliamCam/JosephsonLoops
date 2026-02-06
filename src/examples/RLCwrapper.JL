@@ -31,13 +31,7 @@ Ic = 1e-6
 
 #time domain simulation wrapper updates- todo
 
-
-
-
-
-
 #linear analysis wrapper - todo
-
 
 
 #hb Setup
@@ -64,8 +58,8 @@ h_prob_res = solve(h_prob)
 
 #Testing and debugging as of now.  
 
-current_p_mag = get_harmonic(h_prob, sweep_res, "P1₊i", 1; output_type=:magnitude)
-theta_p_mag = get_harmonic(h_prob, sweep_res, "P1₊dθ", 1; output_type=:magnitude)
+current_p_mag = get_harmonic(h_prob, sweep_res, "C1₊i", 1; output_type=:magnitude)
+theta_p_mag = get_harmonic(h_prob, sweep_res, "J1₊θ", 1; output_type=:magnitude)
 
 phase = get_harmonic(h_prob, sweep_res, "P1₊dθ", 1; output_type=:phase)
 

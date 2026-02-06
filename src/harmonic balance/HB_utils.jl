@@ -10,6 +10,8 @@ struct HarmonicProblem
     params::Dict
     variable_map::Dict{Tuple{String, Int, Symbol}, Num}
     observed::Vector{Equation}
+    jacobian_matrices::Union{Tuple{Matrix{Num}, Matrix{Num}}, Nothing}
+    is_linear::Bool
 end
 
 struct HarmonicSweepProblem
@@ -200,14 +202,21 @@ compile::Bool=false`: Whether to compile and tear the resulting nonlinear system
 # Details
 If the generated system is over-determined (more equations than variables), the function automatically truncates the equation set to match the number of unknowns.
 """
-function HarmonicProblem(sys, ωvar::Num, params; tearing::Bool=true, N::Int=1) #jac::Bool=false)
+function HarmonicProblem(sys, ωvar::Num, params; tearing::Bool=true, N::Int=1, linear::Bool=false) 
     # 1. Handle Time Variable
     tvar = ModelingToolkit.get_iv(sys) #put _ in tvar and wvars
     tvar = Num(tvar)
 
     eqs, states = get_full_equations(sys, tvar)
 
-    nonlinear_sys, _, variable_map = harmonic_equation(eqs, states, tvar, ωvar, N) 
+    if linear
+        nonlinear_sys, _, variable_map, (J0, J1) = harmonic_equation(eqs, states, tvar, ωvar, N; jac=true)
+        jacobian_matrices = (J0, J1)
+    else
+        nonlinear_sys, _, variable_map = harmonic_equation(eqs, states, tvar, ωvar, N; jac=false)
+        jacobian_matrices = nothing
+    end
+    
     sys_eqs = equations(nonlinear_sys)
     sys_vars = unknowns(nonlinear_sys)
     
@@ -226,7 +235,7 @@ function HarmonicProblem(sys, ωvar::Num, params; tearing::Bool=true, N::Int=1) 
     end
   
 
-    return HarmonicProblem(complete_sys, N, unknowns(complete_sys), ωvar, params, variable_map, observed(sys))
+    return HarmonicProblem(complete_sys, N, unknowns(complete_sys), ωvar, params, variable_map, observed(sys), jacobian_matrices, linear)
 end
 
 
@@ -249,7 +258,7 @@ function solve(sweepprob::HarmonicSweepProblem)
     # Setup Parameters
     current_params = copy(prob.params)
    
-    current_params[sweep_var] = first(sweep_vals)
+    # current_params[sweep_var] = first(sweep_vals) # Do not permanently set, just ensure it's in the dict?
     
     
     system_unknowns = prob.sys_vars
@@ -258,6 +267,10 @@ function solve(sweepprob::HarmonicSweepProblem)
     u0_guess = fill(0.0, length(prob.sys_vars))
 
     # Define Problem - got rid of deprecated error
+  
+    current_params[sweep_var] = first(sweep_vals)
+    
+
     combined_args = merge(Dict(prob.sys_vars .=> u0_guess), current_params)
     nl_prob = NonlinearProblem(sys, combined_args)
     
@@ -598,7 +611,6 @@ function reconstruct_from_observed(h_prob::HarmonicProblem, sweep_res, var_name:
             final_expr = Symbolics.simplify(final_expr)
         end
     end
-    
 
     
     # Compile and evaluate
@@ -690,4 +702,3 @@ function evaluate_harmonic_sweep(func, h_prob, sweep_res, params)
     end
     return out_vals
 end
-
