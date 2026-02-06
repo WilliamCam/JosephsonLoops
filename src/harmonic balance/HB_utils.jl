@@ -691,3 +691,92 @@ function evaluate_harmonic_sweep(func, h_prob, sweep_res, params)
     return out_vals
 end
 
+"""
+    fetch_harmonic_vector(target_key::String, h_prob::HarmonicProblem, sweep_res, params, obs_dict, known_vars)
+
+Retrieves the data vector for a specific harmonic variable, checking both direct results and observed equations.
+
+The function attempts to resolve the `target_key` in the following order:
+1. Checks if `target_key` exists directly in `sweep_res.results`.
+2. If not found, checks `obs_dict` (observed variables). If found, it flattens the observed equation, compiles it into a function, and evaluates it across the sweep.
+3. If the key is not found in either, returns a vector of zeros.
+
+# Arguments
+- `target_key::String`: The name or substring of the variable to retrieve (e.g., "u", "sys₊u").
+- `h_prob`: The `HarmonicProblem` context.
+- `sweep_res`: The simulation sweep results.
+- `params`: Base parameter values.
+- `obs_dict`: Dictionary of observed equations.
+- `known_vars`: Set of fundamental system variables.
+
+# Returns
+- `Vector{Float64}`: The numerical values of the target variable across the sweep.
+"""
+
+
+function fetch_harmonic_vector(target_key::String, h_prob::HarmonicProblem, sweep_res, params, obs_dict)
+    
+    # A. Check Results (Fast Path)
+    res_keys = collect(keys(sweep_res.results))
+    res_idx = findfirst(k -> occursin(target_key, string(k)), res_keys)
+    if res_idx !== nothing
+        return sweep_res.results[res_keys[res_idx]]
+    end
+
+    # B. Check Observed Equations (Slow Path)
+    # FIX: Collect keys into a Vector so 'findfirst' works
+    obs_keys = collect(keys(obs_dict))
+    match_idx = findfirst(k -> occursin(target_key, k), obs_keys)
+    
+    if match_idx !== nothing
+        key = obs_keys[match_idx]
+        
+        # Get RHS (already in harmonic form)
+        raw_rhs = obs_dict[key]
+        
+        # Check if expression contains unknown harmonic coefficients (like G[1])
+        vars_in_rhs = Symbolics.get_variables(raw_rhs)
+        known_syms = Set(h_prob.sys_vars)
+        param_syms = Set(parameters(h_prob.sys))
+        
+        unknown_vars = filter(v -> v ∉ known_syms && v ∉ param_syms, vars_in_rhs)
+        
+        if !isempty(unknown_vars)
+            # Recursively substitute unknown harmonic coefficients
+            for _ in 1:10
+                vars_in_expr = Symbolics.get_variables(raw_rhs)
+                unknowns = filter(v -> v ∉ known_syms && v ∉ param_syms, vars_in_expr)
+                
+                if isempty(unknowns)
+                    break
+                end
+                
+                subs_dict = Dict()
+                for u in unknowns
+                    u_str = string(u)
+                    if haskey(obs_dict, u_str)
+                        subs_dict[u] = obs_dict[u_str]
+                    end
+                end
+                
+                if isempty(subs_dict)
+                    break
+                end
+                
+                raw_rhs = substitute(raw_rhs, subs_dict)
+                raw_rhs = Symbolics.simplify(raw_rhs)
+            end
+        end
+        
+        # Compile Function
+        func_ex = build_function(raw_rhs, h_prob.sys_vars, parameters(h_prob.sys), expression=Val{true})
+        func = eval(func_ex)
+        
+        # Evaluate
+        return evaluate_harmonic_sweep(func, h_prob, sweep_res, params)
+    end
+
+    # C. Not Found (Assume 0.0)
+    return zeros(Float64, length(sweep_res.sweep_vals))
+end
+
