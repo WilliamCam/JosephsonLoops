@@ -2,23 +2,24 @@ using Symbolics
 using SymbolicUtils
 using NonlinearSolve
 
-struct HarmonicProblem
-    sys  # The algebraic NonlinearSystem
-    N::Int
-    sys_vars::Vector{Num}
-    ωvar::Num
-    params::Dict
+struct HarmonicSystem
+    system::Vector{Equation}
+    harmonic_vars::Vector{Num}
+    ω_var::Num
+    N::Ints
     variable_map::Dict{Tuple{String, Int, Symbol}, Num}
-    observed::Vector{Equation}
+    observed_equations::Vector{Equation}
 end
 
-struct HarmonicSweepProblem
-    prob::HarmonicProblem
-    sweep_var::Num
+
+struct HarmonicProblem
+    harmonic_system::HarmonicSystem
+    params::Dict
+    swept_params::Num
     sweep_vals::AbstractVector
 end
 
-struct HarmonicSweepResult
+struct HarmonicResult
     sweep_var::Num
     sweep_vals::AbstractVector
     results::Dict{Num, Vector{Float64}} # Maps symbolic variables to result vectors
@@ -200,7 +201,7 @@ compile::Bool=false`: Whether to compile and tear the resulting nonlinear system
 # Details
 If the generated system is over-determined (more equations than variables), the function automatically truncates the equation set to match the number of unknowns.
 """
-function HarmonicProblem(sys, ωvar::Num, params; tearing::Bool=true, N::Int=1) #jac::Bool=false)
+function HarmonicSystem(sys, ωvar::Num; tearing::Bool=true, N::Int=1) #jac::Bool=false)
     # 1. Handle Time Variable
     tvar = ModelingToolkit.get_iv(sys) #put _ in tvar and wvars
     tvar = Num(tvar)
@@ -226,24 +227,27 @@ function HarmonicProblem(sys, ωvar::Num, params; tearing::Bool=true, N::Int=1) 
     end
   
 
-    return HarmonicProblem(complete_sys, N, unknowns(complete_sys), ωvar, params, variable_map, observed(sys))
+    return HarmonicSystem(complete_sys, unknowns(complete_sys), ωvar, N, variable_map, observed(sys))
+end
+
+function HarmonicProblem(harmonic_system::HarmonicSystem, params, etc..)
 end
 
 
 
-function solve(prob::HarmonicProblem)
+function solve(prob::HarmonicProblem, ; kwargs...)
     u0_guess = fill(0.0, length(prob.sys_vars))
     current_params = prob.params
     #to remove deprecated error from NonlinearProblem, we have to pass merge(dict, u0)
     combined_args = merge(Dict(prob.sys_vars .=> u0_guess), current_params)
     nl_prob = NonlinearProblem(prob.sys, combined_args)
-    return ModelingToolkit.solve(nl_prob)
+    return ModelingToolkit.solve(nl_prob; kwargs...)
 end
 
-function solve(sweepprob::HarmonicSweepProblem)
-    prob = sweepprob.prob
-    sweep_var = sweepprob.sweep_var
-    sweep_vals = sweepprob.sweep_vals
+function solve(harmonic_problem::HarmonicProblem; kwargs...)
+    prob = harmonic_problem.harmonic_system
+    sweep_var = harmonic_problem.sweep_var
+    sweep_vals = harmonic_problem.sweep_vals
     sys = prob.sys
 
     # Setup Parameters
@@ -273,13 +277,13 @@ function solve(sweepprob::HarmonicSweepProblem)
     for  val in sweep_vals     
         # Continuation: use previous solution (last_u)
         nl_prob = remake(nl_prob; u0 = last_u, p = [sweep_var => val])
-        sol = ModelingToolkit.solve(nl_prob)
+        sol = ModelingToolkit.solve(nl_prob, kwargs...)
         last_u = sol.u
         for (i, v) in enumerate(prob.sys_vars)
             push!(results[v], sol.u[i])
         end
     end
-    return HarmonicSweepResult(sweep_var, collect(sweep_vals), results)
+    return HarmonicResult(sweep_var, collect(sweep_vals), results)
 end
 
 
