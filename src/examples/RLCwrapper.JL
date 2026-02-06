@@ -1,8 +1,9 @@
-using ModelingToolkit
 using JosephsonLoops
+using ModelingToolkit
 using Plots
 using Symbolics
 using DifferentialEquations
+
 
 #need to include harmonic balance files on repl/terminal
 
@@ -29,6 +30,7 @@ Ic = 1e-6
 Φ₀ = 2.067833848e-15
 
 #time domain simulation wrapper updates- todo
+
 #linear analysis wrapper - todo
 
 
@@ -36,49 +38,40 @@ Ic = 1e-6
 #hb Setup
 #ask will how he set up includes/ throwing compilation error here when i try to include HB files separately or from Josephson Loops
 
-h_prob = jls.HarmonicProblem(model, jls.P1.Isrc.ω; N=1, tearing = true)
-
 # --- 4. Frequency Sweep ---
-# Define the sweep range (4.5 to 5.0 GHz)
-ω_vec = 2*pi*(4.5:0.001:5.0)*1e9
+# Define the sweep range (4.5 to 10.0 GHz)
+ω_vec = 2*pi*(8:0.001:10.0)*1e9
 
 # Create a copy of parameters for the sweep
 sweep_params = copy(ps)
 sweep_params[jls.P1.Isrc.I] = 0.00565e-6 # Specific current for this test
+sweep_params[jls.J1.R] = 1e9   # High resistance (open circuit approximation)
 
+#create the HarmonicProblem and HarmonicSweepProblem
+h_prob = jls.HarmonicProblem(model, jls.P1.Isrc.ω, sweep_params ;tearing = true, N=1)
+sweep_prob = jls.HarmonicSweepProblem(h_prob, jls.P1.Isrc.ω, ω_vec)
 sweep_params[jls.J1.R] = 1e9             # High resistance (open circuit approximation)
 # Solve the harmonic balance problem over the frequency sweep
-sweep_res = jls.solve_sweep(h_prob, sweep_params, jls.P1.Isrc.ω => ω_vec)
+
+# Solve the harmonic balance problem over the frequency sweep and the fundamental harmonic balance problem
+
+sweep_res = jls.solve(sweep_prob)
+h_prob_res = jls.solve(h_prob)
 
 
+#Testing =======
 
+current_p_mag = jls.get_harmonic(h_prob, sweep_res, "P1₊i", 1; output_type=:magnitude)
+theta_p_mag = jls.get_harmonic(h_prob, sweep_res, "P1₊dθ", 1; output_type=:magnitude)
 
-#Testing and debugging as of now. Able to get P1, C1 , J1 but not P.Rsrc.i 
+Ii = @. (0.00565e-6 - current_p_mag)
 
-current_p = jls.get_harmonic_coeffs(h_prob, model, sweep_res, ps, "P1₊i")
-thetap = jls.get_harmonic_coeffs(h_prob, model, sweep_res, ps, "P1₊dθ")
-
-
-phase = jls.get_harmonic_phase(h_prob, model, sweep_res, ps, "P1")
-
-# solution1 = get_harmonic_coeffs(h_prob, model, sweep_res, ps, "P1")
-# solution2 = get_harmonic_coeffs(h_prob, model, sweep_res, ps, "C1")
-
-Ii = @. abs(0.00565e-6 - current_p)
-
-Vi = @. abs(jls.Φ₀ / (2*pi) * thetap) 
+Vi = @. (jls.Φ₀ / (2*pi) * theta_p_mag) 
 
 # Calculate Power Waves (a = incident, b = reflected)
 Z0 = 50.0
+#ask will if we need abs. here or not and ask about
 ai = @. 0.5 * (Vi + Z0 * Ii) / sqrt(Z0)
 bi = @. 0.5 * (Vi - Z0 * Ii) / sqrt(Z0)
 
-#4. Plot S11-
-p = plot(ω_vec / (2*pi), abs.(bi ./ ai), 
-    title = "S11 Scattering Parameter",
-    xlabel = "Frequency (Hz)", 
-    ylabel = "|S11|", 
-    label = "S11", 
-    lw = 2)
-
-display(p)
+plot(ω_vec/(2*pi), (bi./ai))
