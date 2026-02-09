@@ -15,7 +15,7 @@ end
 struct HarmonicProblem
     harmonic_system::HarmonicSystem
     params::Dict
-    swept_params::Num
+    sweep_params::Num
     sweep_vals::AbstractVector
 end
 
