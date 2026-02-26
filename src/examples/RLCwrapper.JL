@@ -42,27 +42,26 @@ Ic = 1e-6
 ω_vec = 2*pi*(8:0.001:10.0)*1e9
 
 # Create a copy of parameters for the sweep
-sweep_params = copy(ps)
+sweep_params = copy(ps) 
 sweep_params[jls.P1.Isrc.I] = 0.00565e-6 # Specific current for this test
 sweep_params[jls.J1.R] = 1e9   # High resistance (open circuit approximation)
 
 #create the HarmonicProblem and HarmonicSweepProblem
-h_prob = HarmonicProblem(model, jls.P1.Isrc.ω, sweep_params ;tearing = true, N=1)
-sweep_prob = HarmonicSweepProblem(h_prob, jls.P1.Isrc.ω, ω_vec)
+h_prob = jls.HarmonicProblem(model, jls.P1.Isrc.ω, sweep_params ;tearing = true, N=1)
+sweep_prob = jls.HarmonicSweepProblem(h_prob, jls.P1.Isrc.ω, ω_vec)
+sweep_params[jls.J1.R] = 1e9             # High resistance (open circuit approximation)
+# Solve the harmonic balance problem over the frequency sweep
 
 # Solve the harmonic balance problem over the frequency sweep and the fundamental harmonic balance problem
 
-sweep_res = solve(sweep_prob)
-h_prob_res = solve(h_prob)
+sweep_res = jls.solve(sweep_prob)
+h_prob_res = jls.solve(h_prob)
 
 
-#Testing and debugging as of now.  
+#Testing =======
 
-current_p_mag = get_harmonic(h_prob, sweep_res, "C1₊i", 1; output_type=:magnitude)
-theta_p_mag = get_harmonic(h_prob, sweep_res, "J1₊θ", 1; output_type=:magnitude)
-
-phase = get_harmonic(h_prob, sweep_res, "P1₊dθ", 1; output_type=:phase)
-
+current_p_mag = jls.get_harmonic(h_prob, sweep_res, "P1₊i", 1; output_type=:magnitude)
+theta_p_mag = jls.get_harmonic(h_prob, sweep_res, "P1₊dθ", 1; output_type=:magnitude)
 
 Ii = @. (0.00565e-6 - current_p_mag)
 
