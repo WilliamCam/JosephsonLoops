@@ -24,7 +24,7 @@ Ic = 1e-6
 tspan = (0.0, 1e-6)
 tsol = jls.tsolve(model, u0, ps, tspan; guesses=guesses)
 p1 = jls.plot(tsol[jls.C1.i][end-400:end], title = "Transient Time Plot", xlabel = "t", ylabel = "I_C1")
-savefig(p1, "transient_plot.png")
+
 
 #hb Setup
 # Define the sweep range (8 to 10.0 GHz)
@@ -37,7 +37,7 @@ sweep_params[jls.J1.R] = 1e9
 sweep_params[jls.J1.R] = 1e9    
 
 #create the HarmonicProblem and HarmonicSweepProblem
-@time h_prob = jls.HarmonicProblem(model, jls.P1.Isrc.ω, sweep_params ;tearing = true, N=1)
+@time h_prob = jls.HarmonicProblem(model, jls.P1.Isrc.ω, sweep_params ;tearing = true, N=2)
 @time sweep_prob = jls.HarmonicSweepProblem(h_prob, jls.P1.Isrc.ω, ω_vec)
 
 
@@ -46,8 +46,8 @@ sweep_params[jls.J1.R] = 1e9
 @time h_prob_res = jls.solve(h_prob)
 
 
-@time current_p_mag = jls.get_harmonic(h_prob, sweep_res, "J1₊i", 1; output_type=:magnitude)
-@time theta_p_mag = jls.get_harmonic(h_prob, sweep_res, "J1₊θ", 1; output_type=:magnitude)
+@time current_p_mag = jls.get_harmonic(h_prob, sweep_res, "J1₊i", 2; output_type=:magnitude)
+@time theta_p_mag = jls.get_harmonic(h_prob, sweep_res, "J1₊θ", 2; output_type=:magnitude)
 
 # obs variables C1.i and J1.i
 @time c1_i_mag = jls.get_harmonic(h_prob, sweep_res, "C1₊i", 1; output_type=:magnitude)

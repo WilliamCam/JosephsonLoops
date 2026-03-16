@@ -614,7 +614,7 @@ point.
        x(t) = A₀ + Σₙ Aₙ cos(nωt) + Bₙ sin(nωt)
    for every original ODE state variable still present in the expression, using the
    numerical HB results, then substitutes all parameters and HB unknowns.
-4. If `t` remains after substitution, the harmonic coefficient is extracted by
+4. If `t` remains after substitution, the harmonic coefficient is extracted by 
    evaluating the resulting function at specific phase points:
    - DC  (`order == 0`):  `(f(0) + f(T/2)) / 2`
    - Cos (`order ≥ 1`):   `(f(0) − f(T/2)) / 2`
@@ -763,28 +763,32 @@ function reconstruct_from_observed(h_prob::HarmonicProblem, sweep_res::HarmonicR
         # Substitute parameters, HB unknowns, and full state ansatz
         val_t = Symbolics.substitute(expr, subs)
         val_t = Symbolics.expand_derivatives(val_t)
-
-        # If t remains  extract the  harmonic coefficient by evaluating at two time points first-harmonic expressions.
+        #double check with will
         remaining = Symbolics.get_variables(val_t)
         if any(isequal(v, tvar_uw) for v in remaining)
-            eval_at = tv -> Float64(Symbolics.unwrap(
-                Symbolics.substitute(Symbolics.unwrap(val_t), Dict(tvar_uw => tv))))
-            if order == 0
-                out_vals[i] = (eval_at(0.0) + eval_at(T_period / 2)) / 2
-            elseif component == :Cos
-                out_vals[i] = (eval_at(0.0) - eval_at(T_period / 2)) / 2
-            else  # :Sin
-                out_vals[i] = (eval_at(T_period / 4) - eval_at(3 * T_period / 4)) / 2
+            val_expanded = Symbolics.expand(val_t)
+            
+            # Build substitution: zero all trig terms except the target
+            isolate = Dict{Any, Any}()
+            for k in 1:(2*N+1)
+                kω = k * ω_val
+                cos_k = Symbolics.unwrap(cos(Num(kω) * t_sym))
+                sin_k = Symbolics.unwrap(sin(Num(kω) * t_sym))
+                if k == order
+                    isolate[cos_k] = (component == :Cos ? 1.0 : 0.0)
+                    isolate[sin_k] = (component == :Sin ? 1.0 : 0.0)
+                else
+                    isolate[cos_k] = 0.0
+                    isolate[sin_k] = 0.0
+                end
             end
+            
+            out_vals[i] = Float64(Symbolics.unwrap(
+                Symbolics.substitute(Symbolics.unwrap(val_expanded), isolate)))
         else
-            try
-                out_vals[i] = Float64(Symbolics.unwrap(val_t))
-            catch
-                vars = Symbolics.get_variables(val_t)
-                error("Cannot convert to Float64. Unresolved vars: $vars in expr: $val_t")
-            end
+            out_vals[i] = Float64(Symbolics.unwrap(val_t))
         end
-    end
+    end  # for i in 1:n_points
 
     return out_vals
 end
