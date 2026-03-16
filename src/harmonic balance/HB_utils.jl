@@ -614,12 +614,10 @@ point.
        x(t) = A₀ + Σₙ Aₙ cos(nωt) + Bₙ sin(nωt)
    for every original ODE state variable still present in the expression, using the
    numerical HB results, then substitutes all parameters and HB unknowns.
-4. If `t` remains after substitution, the harmonic coefficient is extracted by 
-   evaluating the resulting function at specific phase points:
-   - DC  (`order == 0`):  `(f(0) + f(T/2)) / 2`
-   - Cos (`order ≥ 1`):   `(f(0) − f(T/2)) / 2`
-   - Sin (`order ≥ 1`):   `(f(T/4) − f(3T/4)) / 2`
-   where `T = 2π/ω` is the fundamental period.
+4. If `t` remains after substitution, the expression is symbolically expanded and the
+   target harmonic coefficient is isolated by setting all `cos(kωt)` and `sin(kωt)`
+   terms to zero except the one corresponding to `order` and `component`, which is set
+   to 1. The result is the coefficient of that trig term in the expanded expression.
 
 # Errors
 - Throws an error if `var_name` is not found in the observed equations.
