@@ -1,13 +1,16 @@
 
 #transient simulation of whole system
-function tsolve(model::System, u0::Vector{Pair{Num, Float64}}, 
-    param_pairs::Vector{Pair{Num, Float64}}, tspan::Tuple{Float64,Float64}; DAE=false, solver_opts = Rodas5(),  kwargs...)  
+function tsolve(model, u0, param_pairs, tspan; DAE=false, solver_opts = Rodas5(), guesses = nothing, kwargs...)  
     if DAE
         prob = DAEProblem(model, merge(Dict(u0), Dict(param_pairs)), tspan; kwargs...)
     else
-        prob = ODEProblem(model, merge(Dict(u0), Dict(param_pairs)), tspan; kwargs...)
+        if guesses !== nothing
+            prob = ODEProblem(model, merge(Dict(u0), Dict(param_pairs)), tspan; guesses=guesses, kwargs...)
+        else
+            prob = ODEProblem(model, merge(Dict(u0), Dict(param_pairs)), tspan; kwargs...)
+        end
     end
-    sol = @time solve(prob, solver_opts)
+    sol = @time DifferentialEquations.solve(prob, solver_opts)
     return sol                                                  #Return the solved ODEProblem
 end
 
@@ -91,7 +94,7 @@ function ensemble_fsolve(
 
     logger = []
     ensemble_prob = EnsembleProblem(prob,prob_func=prob_func, output_func=output_func)
-    sol = solve(ensemble_prob,alg, EnsembleSerial(), trajectories=Ntraj)
+    sol = DifferentialEquations.solve(ensemble_prob,alg, EnsembleSerial(), trajectories=Ntraj)
     return sol
 end
 
@@ -144,7 +147,7 @@ function ensemble_parameter_sweep(
 
     logger = []
     ensemble_prob = EnsembleProblem(prob,prob_func=prob_func, output_func=output_func)
-    sol = solve(ensemble_prob,alg, method, trajectories=Ntraj)
+    sol = DifferentialEquations.solve(ensemble_prob,alg, method, trajectories=Ntraj)
     return sol
 end
 
