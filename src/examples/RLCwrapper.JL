@@ -46,8 +46,8 @@ sweep_params[jls.J1.R] = 1e9
 @time h_prob_res = jls.solve(h_prob)
 
 
-@time current_p_mag = jls.get_harmonic(h_prob, sweep_res, "J1₊i", 2; output_type=:magnitude)
-@time theta_p_mag = jls.get_harmonic(h_prob, sweep_res, "J1₊θ", 2; output_type=:magnitude)
+@time current_p_mag = jls.get_harmonic(h_prob, sweep_res, "P1₊i", 2; output_type=:magnitude)
+@time theta_p_mag = jls.get_harmonic(h_prob, sweep_res, "P1₊dθ", 2; output_type=:magnitude)
 
 # obs variables C1.i and J1.i
 @time c1_i_mag = jls.get_harmonic(h_prob, sweep_res, "C1₊i", 1; output_type=:magnitude)

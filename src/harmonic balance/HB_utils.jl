@@ -314,7 +314,7 @@ function HarmonicProblem(sys::ModelingToolkit.AbstractSystem, ωvar::Num, params
     harmonic_sys = HarmonicSystem(sys, ωvar; tearing=tearing, N=N)
     return HarmonicProblem(harmonic_sys, params)
 end
-
+#put initial conditions in and sweep params 
 """
     solve(prob::HarmonicProblem; kwargs...) -> NonlinearSolution
 
@@ -442,73 +442,10 @@ at each sweep point.
 Throws if `sym` cannot be located in either the results or the observed equations, or if
 the fallback expression cannot be fully reduced to a numeric value.
 """
-function fetch_harmonic_coeff(sym::Num, h_prob::HarmonicProblem, sweep_res::HarmonicResult)
+function fetch_harmonic_coeff(sym::Num, ::HarmonicProblem, sweep_res::HarmonicResult)
     result = _find_sym(sym, sweep_res.results, sweep_res.observed_results)
     result !== nothing && return result
-
-    # Last resort: manual symbolic substitution from observed equations
-    sys = h_prob.harmonic_system.complete_sys
-    sym_str = clean_name(sym)
-    target_eq = nothing
-    for eq in observed(sys)
-        if isequal(eq.lhs, sym) || clean_name(eq.lhs) == sym_str
-            target_eq = eq
-            break
-        end
-    end
-    target_eq === nothing && error("Harmonic coefficient $sym not found in results or observed equations")
-
-    expr = Symbolics.unwrap(target_eq.rhs)
-    obs_dict = Dict{Any, Any}(Symbolics.unwrap(eq.lhs) => Symbolics.unwrap(eq.rhs) for eq in observed(sys))
-    states_set = Set(Symbolics.unwrap(v) for v in unknowns(sys))
-    params_set = Set(Symbolics.unwrap(p) for p in parameters(sys))
-    tvar_uw = Symbolics.unwrap(h_prob.harmonic_system.t_var)
-
-    for _ in 1:20
-        vars_in_expr = Symbolics.get_variables(expr)
-        unknown_vars = filter(v -> !in(v, states_set) && !in(v, params_set) && !isequal(v, tvar_uw), vars_in_expr)
-        isempty(unknown_vars) && break
-        
-        subs_dict_expr = Dict()
-        for u in unknown_vars
-            # Handle derivatives like Differential(t)(J1₊out₊Φ(t))
-            if SymbolicUtils.iscall(u) && SymbolicUtils.operation(u) isa Differential
-                base_var = SymbolicUtils.arguments(u)[1]
-                if haskey(obs_dict, base_var)
-                    subs_dict_expr[u] = Symbolics.expand_derivatives(Differential(tvar_uw)(obs_dict[base_var]))
-                end
-            elseif haskey(obs_dict, u)
-                subs_dict_expr[u] = obs_dict[u]
-            end
-        end
-        
-        isempty(subs_dict_expr) && break
-        expr = Symbolics.substitute(expr, subs_dict_expr)
-        expr = Symbolics.expand_derivatives(expr)
-        expr = Symbolics.simplify(expr)
-    end
-
-    n_points = length(sweep_res.sweep_vals)
-    out_vals = zeros(Float64, n_points)
-    
-    param_syms = parameters(sys)
-    p_vals_base = [h_prob.params[p] for p in param_syms]
-    sweep_idx = findfirst(isequal(sweep_res.sweep_var), param_syms)
-    states_vec = unknowns(sys)
-    
-    for i in 1:n_points
-        p_dict = Dict{Any, Any}(Symbolics.unwrap(param_syms[j]) => p_vals_base[j] for j in eachindex(param_syms))
-        sweep_idx !== nothing && (p_dict[Symbolics.unwrap(sweep_res.sweep_var)] = sweep_res.sweep_vals[i])
-        u_dict = Dict{Any, Any}(Symbolics.unwrap(v) => sweep_res.results[v][i] for v in states_vec)
-
-        subs_dict = merge(p_dict, u_dict)
-        val = Symbolics.substitute(expr, subs_dict)
-        if val isa SymbolicUtils.BasicSymbolic || val isa Num
-            val = Symbolics.substitute(val, subs_dict)
-        end
-        out_vals[i] = Float64(Symbolics.unwrap(val))
-    end
-    return out_vals
+    error("Harmonic coefficient $sym not found in results")
 end
 
 
