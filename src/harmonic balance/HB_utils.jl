@@ -516,6 +516,34 @@ function get_harmonic(h_prob::HarmonicProblem, sweep_res::HarmonicResult, var_na
     end
 end
 
+function get_harmonic_Will(h_prob::HarmonicProblem, var_name::String, order::Int)
+    var_clean = clean_name(var_name) #drops (t)
+    vmap = h_prob.harmonic_system.variable_map
+    if order == 0
+        key = find_varmap_key(vmap, var_clean, 0, :Cos)
+        if key !== nothing
+            phasor = complex.(fetch_harmonic_coeff(vmap[key], h_prob, sweep_res))
+        else
+            phasor = complex.(reconstruct_from_observed(h_prob, sweep_res, var_clean, 0, :Cos))
+        end
+    else
+        key_cos = find_varmap_key(vmap, var_clean, order, :Cos)
+        key_sin = find_varmap_key(vmap, var_clean, order, :Sin)
+        
+        if key_cos !== nothing && key_sin !== nothing
+            A = vmap[key_cos] # Num
+            B = vmap[key_sin] # Num
+            phasor_expr = (A - 1im * B) # Equation / Expression
+            phasor = build_function(phasor_expr, [A, B], expression=Val{false}) # Function
+        else
+            A_vec = reconstruct_from_observed(h_prob, sweep_res, var_clean, order, :Cos)
+            B_vec = reconstruct_from_observed(h_prob, sweep_res, var_clean, order, :Sin)
+            phasor = @. (A_vec - im*B_vec)
+        end
+    end
+    return phasor
+end
+
 """
     reconstruct_from_observed(h_prob, sweep_res, var_name, order, component) -> Vector{Float64}
 
