@@ -481,19 +481,11 @@ function get_harmonic(h_prob::HarmonicProblem, var_name::String, order::Int)
     return function(sweep_res::HarmonicResult)
         n_points = length(sweep_res.sweep_vals)
         input_vec = zeros(Float64, n_vmap + n_params)
-
-        # Fill fixed parameter values
         input_vec[n_vmap+1:end] .= param_vals
-
-        # Pre-build lookup: for each vmap symbol, find its result vector.
-        # Uses _find_sym (string-based fallback) to bridge the symbol identity
-        # gap between harmonic_equation's symbols and the compiled system's.
-        # Dropped/unconstrained vars → nothing → treated as 0.0
         vmap_vecs = Vector{Union{Nothing, Vector{Float64}}}(undef, n_vmap)
         for (j, sym) in enumerate(all_vmap_syms)
             vmap_vecs[j] = _find_sym(sym, sweep_res.results)
         end
-
         # Locate sweep parameter index in param section
         sweep_j = nothing
         sweep_str = clean_name(sweep_res.sweep_var)
@@ -502,7 +494,6 @@ function get_harmonic(h_prob::HarmonicProblem, var_name::String, order::Int)
                 sweep_j = j; break
             end
         end
-
         phasor = Vector{ComplexF64}(undef, n_points)
         for i in 1:n_points
             for j in 1:n_vmap
@@ -639,7 +630,7 @@ function reconstruct_from_observed(h_prob::HarmonicProblem, var_name::String, or
     val_t = Symbolics.substitute(expr, ansatz_subs)
     val_t = Symbolics.expand_derivatives(val_t)
 
-    # ── Isolate the target harmonic component ──
+    #  Isolate the target harmonic component 
     remaining = Symbolics.get_variables(val_t)
     if any(isequal(v, tvar_uw) for v in remaining)
         val_expanded = Symbolics.expand(val_t)
