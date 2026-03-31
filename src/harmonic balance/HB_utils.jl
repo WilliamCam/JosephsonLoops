@@ -13,29 +13,11 @@ end
 struct HarmonicProblem
     harmonic_system::HarmonicSystem
     params::Dict
+    sweep_var::Union{Num, Nothing}
+    sweep_vals::Union{AbstractVector, Nothing}
+    u0::Vector{Float64}
 end
 
-struct HarmonicSweepProblem
-    prob::HarmonicProblem
-    sweep_var::Num
-    sweep_vals::AbstractVector
-    
-    function HarmonicSweepProblem(prob::HarmonicProblem, sweep_var::Num, sweep_vals::AbstractVector)
-        new_params = copy(prob.params)
-        if haskey(new_params, sweep_var)
-            delete!(new_params, sweep_var)
-        end
-        sweep_var_uw = Symbolics.unwrap(sweep_var)
-        if haskey(new_params, sweep_var_uw)
-            delete!(new_params, sweep_var_uw)
-        end
-        new_prob = HarmonicProblem(prob.harmonic_system, new_params)
-        new(new_prob, sweep_var, sweep_vals)
-    end
-end
-
-HarmonicSweepProblem(prob::HarmonicProblem, sweep_var::Nothing, sweep_vals) = prob
-HarmonicSweepProblem(prob::HarmonicProblem) = prob
 
 struct HarmonicResult
     sweep_var::Num
@@ -293,113 +275,90 @@ function HarmonicSystem(sys, ωvar::Num; tearing::Bool=true, N::Int=1)
 end
 
 """
-    HarmonicProblem(sys, ωvar, params; tearing=true, N=1) -> HarmonicProblem
+    HarmonicProblem(harmonic_sys, params; sweep_var=nothing, sweep_vals=nothing) -> HarmonicProblem
+    HarmonicProblem(sys, ωvar, params; tearing=true, N=1, sweep_var=nothing, sweep_vals=nothing) -> HarmonicProblem
 
-Convenience constructor that builds a `HarmonicSystem` from a time-domain ODE system
-and immediately pairs it with parameter values.
+Construct a `HarmonicProblem` from either a pre-built `HarmonicSystem` or directly
+from a time-domain ODE system (which will be expanded into a `HarmonicSystem` internally).
+
+Prefer passing a pre-built `HarmonicSystem` when solving multiple times with different
+parameters, so the (potentially expensive) harmonic expansion is not repeated.
 
 # Arguments
-- `sys::ModelingToolkit.AbstractSystem`: The time-domain ODE system to expand.
-- `ωvar::Num`: Symbolic variable for the fundamental angular frequency ω.
+- `harmonic_sys::HarmonicSystem`: A pre-built harmonic system (first method).
+- `sys::ModelingToolkit.AbstractSystem`: The time-domain ODE system to expand (second method).
+- `ωvar::Num`: Symbolic variable for the fundamental angular frequency ω (second method only).
 - `params`: Parameter map from symbolic variables to numeric values (e.g. `Dict(ω => 1.0, R => 50.0)`).
 
 # Keywords
-- `N::Int=1`: Harmonic truncation order passed to `HarmonicSystem`.
-- `tearing::Bool=true`: Whether to structurally simplify the nonlinear system via `mtkcompile`.
+- `sweep_var::Union{Num,Nothing}=nothing`: Parameter to sweep over.
+- `sweep_vals::Union{AbstractVector,Nothing}=nothing`: Values for the sweep parameter.
+- `N::Int=1`: Harmonic truncation order — second method only, passed to `HarmonicSystem`.
+- `tearing::Bool=true`: Whether to structurally simplify via `mtkcompile` — second method only.
 
 # Returns
-A `HarmonicProblem` ready to be passed to `solve` or wrapped in a `HarmonicSweepProblem`.
+A `HarmonicProblem` ready to be passed to `solve`.
 """
-function HarmonicProblem(sys::ModelingToolkit.AbstractSystem, ωvar::Num, params; tearing::Bool=true, N::Int=1)
-    harmonic_sys = HarmonicSystem(sys, ωvar; tearing=tearing, N=N)
-    return HarmonicProblem(harmonic_sys, params)
+function HarmonicProblem(harmonic_sys::HarmonicSystem, params; sweep_var::Union{Num, Nothing}=nothing, sweep_vals::Union{AbstractVector, Nothing}=nothing)
+    u0 = fill(0.0, length(unknowns(harmonic_sys.complete_sys)))
+    return HarmonicProblem(harmonic_sys, params, sweep_var, sweep_vals, u0)
 end
-#put initial conditions in and sweep params 
 """
-    solve(prob::HarmonicProblem; kwargs...) -> NonlinearSolution
+    solve(prob::HarmonicProblem; kwargs...) -> NonlinearSolution | HarmonicResult
 
-Solve the harmonic balance system at a single parameter point.
+Solve the harmonic balance system. If `sweep_var` and `sweep_vals` are set on the
+problem, performs a parameter sweep using continuation (warm-starting each point from
+the previous solution). Otherwise, solves at a single parameter point.
 
-Constructs a `NonlinearProblem` from the compiled HB system using a zero initial guess
-for all unknowns, then calls `ModelingToolkit.solve`. All keyword arguments are
-forwarded to the underlying solver (e.g. `alg`, `abstol`, `reltol`).
+All keyword arguments are forwarded to `ModelingToolkit.solve` (e.g. `alg`, `abstol`).
 
 # Returns
-A `NonlinearSolution` as returned by `ModelingToolkit.solve`. Harmonic coefficients
-can be read directly from `sol[var]` using the symbolic unknowns of
-`prob.harmonic_system.complete_sys`.
+- **No sweep**: A `NonlinearSolution` whose harmonic coefficients can be read via `sol[var]`.
+- **With sweep**: A `HarmonicResult` containing the swept parameter, sweep values, and
+  result arrays for each HB unknown.
 """
 function solve(prob::HarmonicProblem; kwargs...)
     hsys = prob.harmonic_system
     sys = hsys.complete_sys
-    u0_guess = fill(0.0, length(unknowns(sys)))
-    combined_args = merge(Dict(unknowns(sys) .=> u0_guess), prob.params)
-    nl_prob = NonlinearProblem(sys, combined_args)
-    return ModelingToolkit.solve(nl_prob; kwargs...)
-end
-
-"""
-    solve(sweepprob::HarmonicSweepProblem; kwargs...) -> HarmonicResult
-
-Solve the harmonic balance system across a parameter sweep using continuation.
-
-Iterates over each value in `sweepprob.sweep_vals`, updating `sweep_var` at each step
-and using the previous solution as the initial guess for the next (`u0` continuation).
-All keyword arguments are forwarded to `ModelingToolkit.solve` at each point.
-
-# Returns
-A `HarmonicResult` containing:
-- `sweep_var`: The swept symbolic parameter.
-- `sweep_vals`: The vector of sweep values as collected.
-- `results`: `Dict{Num, Vector{Float64}}` mapping each HB unknown to its values across
-  the sweep.
-- `observed_results`: `Dict` for pre-computed observed quantities (populated downstream
-  by `get_harmonic` / `fetch_harmonic_coeff` on demand).
-
-# Details
-- Continuation means the solver is warm-started from the previous sweep point's solution.
-  This improves convergence along smooth solution branches but may cause the solver to
-  track an unstable branch through a bifurcation rather than jump to the stable one.
-- Progress is printed to stdout for each sweep point.
-"""
-function solve(sweepprob::HarmonicSweepProblem; kwargs...)
-    prob = sweepprob.prob
-    hsys = prob.harmonic_system
-    sweep_var = sweepprob.sweep_var
-    sweep_vals = sweepprob.sweep_vals
-    sys = hsys.complete_sys
-
-    # Setup Parameters
-    current_params = copy(prob.params)
     system_unknowns = unknowns(sys)
-    
-    # Initial guess
-    u0_guess = fill(0.0, length(system_unknowns))
+
+    # no sweep
+    if prob.sweep_var === nothing || prob.sweep_vals === nothing
+        combined_args = merge(Dict(system_unknowns .=> prob.u0), prob.params)
+        nl_prob = NonlinearProblem(sys, combined_args)
+        return ModelingToolkit.solve(nl_prob; kwargs...)
+    end
+
+    #Sweep solve 
+    sweep_var = prob.sweep_var
+    sweep_vals = prob.sweep_vals
+
+    # Remove sweep variable from fixed params to avoid conflicts
+    current_params = copy(prob.params)
+    if haskey(current_params, sweep_var)
+        delete!(current_params, sweep_var)
+    end
+    sweep_var_uw = Symbolics.unwrap(sweep_var)
+    if haskey(current_params, sweep_var_uw)
+        delete!(current_params, sweep_var_uw)
+    end
 
     current_params[sweep_var] = first(sweep_vals)
-
-    combined_args = merge(Dict(system_unknowns .=> u0_guess), current_params)
+    combined_args = merge(Dict(system_unknowns .=> prob.u0), current_params)
     nl_prob = NonlinearProblem(sys, combined_args)
-    
-    # Results containers for unknowns
+
+    # Results containers
     results = Dict{Num, Vector{Float64}}()
     for v in system_unknowns
         results[v] = Float64[]
         sizehint!(results[v], length(sweep_vals))
     end
-    
-    # Results containers for observed symbols and extra varmap symbols
-    # Key by Num symbol (eq.lhs) for exact isequal matching
     observed_results = Dict{Any, Vector{Float64}}()
 
-    # Also register extra symbols pre-identified in HarmonicSystem
-   
     println("Sweeping $(sweep_var) over $(length(sweep_vals)) points...")
-    # Initialize last_u with the numeric initial guess
     last_u = nl_prob.u0
-  
-    for  val in sweep_vals     
-        # Continuation: use previous solution (last_u)
+
+    for val in sweep_vals
         nl_prob = remake(nl_prob; u0 = last_u, p = [sweep_var => val])
         sol = ModelingToolkit.solve(nl_prob, kwargs...)
         last_u = sol.u
@@ -410,158 +369,171 @@ function solve(sweepprob::HarmonicSweepProblem; kwargs...)
     return HarmonicResult(sweep_var, collect(sweep_vals), results, observed_results)
 end
 
-
 """
-    fetch_harmonic_coeff(sym, h_prob, sweep_res) -> Vector{Float64}
+    _get_coeff_expr(sym, h_prob) -> Num
 
-Retrieve the sweep-resolved numeric values for a single HB coefficient symbol `sym`.
+Return a symbolic expression for a single HB coefficient symbol `sym`.
 
-# Arguments
-- `sym::Num`: A symbolic variable representing one harmonic coefficient (e.g. the cosine
-  or sine amplitude of a particular state at a particular harmonic order), as stored in
-  `h_prob.harmonic_system.variable_map`.
-- `h_prob::HarmonicProblem`: The harmonic balance problem, used to access the system
-  definition and parameter values when a fallback evaluation is required.
-- `sweep_res::HarmonicResult`: The solver output containing `results` (primary HB
-  unknowns) and `observed_results` (pre-computed observed quantities).
-
-# Returns
-A `Vector{Float64}` of length `length(sweep_res.sweep_vals)`, giving the value of `sym`
-at each sweep point.
-
-# Lookup strategy
-1. **Direct lookup** — searches `sweep_res.results` then `sweep_res.observed_results`
-   using hash equality, `isequal`, and finally string-name matching via `_find_sym`.
-2. **Symbolic fallback** — if the symbol is not found in the cached results, locates the
-   corresponding observed equation in `ModelingToolkit.observed(sys)`, recursively
-   substitutes any observed-in-observed dependencies (up to 20 levels), and evaluates
-   the resulting expression numerically at each sweep point by substituting all HB
-   unknowns and sweep parameters.
-
-# Errors
-Throws if `sym` cannot be located in either the results or the observed equations, or if
-the fallback expression cannot be fully reduced to a numeric value.
+If `sym` is a direct unknown of the compiled system it is returned as-is (it will be
+substituted numerically later by `get_harmonic`).  If it was eliminated by `mtkcompile`,
+its expression is recovered from the compiled system's observed equations.
 """
-function fetch_harmonic_coeff(sym::Num, ::HarmonicProblem, sweep_res::HarmonicResult)
-    result = _find_sym(sym, sweep_res.results, sweep_res.observed_results)
-    result !== nothing && return result
-    error("Harmonic coefficient $sym not found in results")
+function _get_coeff_expr(sym::Num, h_prob::HarmonicProblem)
+    sys = h_prob.harmonic_system.complete_sys
+    # If sym is a system unknown, return it directly — it will be substituted numerically
+    for u in unknowns(sys)
+        isequal(u, sym) && return sym
+    end
+    # isequal can fail for array-indexed vars (different underlying array objects after
+    # mtkcompile).  Retry with string comparison, returning the COMPILED system's symbol
+    # so that build_function can map it to the correct input position.
+    sym_str = clean_name(sym)
+    for u in unknowns(sys)
+        clean_name(u) == sym_str && return Num(Symbolics.unwrap(u))
+    end
+    # sym was eliminated by tearing — find it in observed equations
+    for eq in observed(sys)
+        isequal(eq.lhs, sym) && return Num(Symbolics.unwrap(eq.rhs))
+    end
+    for eq in observed(sys)
+        clean_name(eq.lhs) == sym_str && return Num(Symbolics.unwrap(eq.rhs))
+    end
+    # Not found anywhere — return the symbol itself (may be zero-forced by structure)
+    @warn "_get_coeff_expr: could not resolve $(clean_name(sym)) — returning as-is. unknowns=$(clean_name.(unknowns(sys))), observed_lhs=$(clean_name.(eq.lhs for eq in observed(sys)))"
+    return sym
 end
 
 
-"""
-    get_harmonic(h_prob, sweep_res, var_name, order; output_type=:complex) -> Vector
 
-Return the harmonic phasor (or a derived quantity) for a named variable at a given
-harmonic order across the full parameter sweep.
+"""
+    get_harmonic(h_prob, var_name, order) -> Function
+
+Build a compiled harmonic extractor for a named variable at a given harmonic order.
+
+Returns a **function** `f(sweep_res::HarmonicResult) -> Vector{ComplexF64}` that
+evaluates the phasor at every sweep point using fast numeric evaluation (no symbolic
+work at call time).
+
+The symbolic expression is built and compiled via `Symbolics.build_function` once
+when `get_harmonic` is called, so the returned function can be reused cheaply on
+different sweep results from the same `HarmonicProblem`.
+
+# Usage
+```julia
+# Compile once (does symbolic work + build_function)
+extract_I = get_harmonic(h_prob, "C1₊i", 1)
+
+# Evaluate on any sweep result (fast numeric only)
+phasor = extract_I(sweep_res)
+mag    = abs.(extract_I(sweep_res))
+phase  = angle.(extract_I(sweep_res))
+```
 
 # Arguments
 - `h_prob::HarmonicProblem`: The harmonic balance problem.
-- `sweep_res::HarmonicResult`: Sweep results returned by the HB solver.
-- `var_name::String`: Name of the variable of interest (namespace prefixes are stripped
-  automatically by `clean_name`).
-- `order::Int`: Harmonic order to extract. `0` returns the DC component; `n ≥ 1` returns
-  the n-th harmonic.
-- `output_type::Symbol` (keyword, default `:complex`): Controls the form of the output.
-  - `:complex`   — phasor  `Aₙ - im·Bₙ`  (complex amplitudes, `Vector{ComplexF64}`)
-  - `:magnitude` — `|Aₙ - im·Bₙ|`  (`Vector{Float64}`)
-  - `:phase`     — `∠(Aₙ - im·Bₙ)` in radians  (`Vector{Float64}`)
-
-# Returns
-A vector of length `length(sweep_res.sweep_vals)` containing the requested quantity at
-each sweep point.
-
-# Details
-- For `order == 0` the DC value is the cosine coefficient A₀ (sine is identically zero
-  by convention).
-- For `order ≥ 1` the phasor is constructed as `Aₙ - im·Bₙ`, consistent with the
-  convention `x(t) = Re[(Aₙ - im·Bₙ) e^{inωt}]`.
-- Coefficients are fetched via `fetch_harmonic_coeff` when the variable appears directly
-  in the HB variable map, or via `reconstruct_from_observed` when the variable is only
-  defined through observed (algebraic) equations.
+- `var_name::String`: Name of the variable of interest.
+- `order::Int`: Harmonic order to extract. `0` = DC, `n ≥ 1` = n-th harmonic.
 """
-function get_harmonic(h_prob::HarmonicProblem, sweep_res::HarmonicResult, var_name::String, order::Int; output_type::Symbol=:complex)
+function get_harmonic(h_prob::HarmonicProblem, var_name::String, order::Int)
 
     var_clean = clean_name(var_name)
     vmap = h_prob.harmonic_system.variable_map
-    
+    sys  = h_prob.harmonic_system.complete_sys
+
+    #Build symbolic phasor expression using raw vmap symbols 
     if order == 0
         key = find_varmap_key(vmap, var_clean, 0, :Cos)
-        if key !== nothing
-            phasor = complex.(fetch_harmonic_coeff(vmap[key], h_prob, sweep_res))
-        else
-            phasor = complex.(reconstruct_from_observed(h_prob, sweep_res, var_clean, 0, :Cos))
-        end
+        phasor_re = key !== nothing ? vmap[key] : reconstruct_from_observed(h_prob, var_clean, 0, :Cos)
+        phasor_im = Num(0.0)
     else
         key_cos = find_varmap_key(vmap, var_clean, order, :Cos)
         key_sin = find_varmap_key(vmap, var_clean, order, :Sin)
-        
         if key_cos !== nothing && key_sin !== nothing
-            A_vec = fetch_harmonic_coeff(vmap[key_cos], h_prob, sweep_res)
-            B_vec = fetch_harmonic_coeff(vmap[key_sin], h_prob, sweep_res)
-            phasor = @. (A_vec - im*B_vec)
+            A_expr = vmap[key_cos]
+            B_expr = vmap[key_sin]
         else
-            A_vec = reconstruct_from_observed(h_prob, sweep_res, var_clean, order, :Cos)
-            B_vec = reconstruct_from_observed(h_prob, sweep_res, var_clean, order, :Sin)
-            phasor = @. (A_vec - im*B_vec)
+            A_expr = reconstruct_from_observed(h_prob, var_clean, order, :Cos)
+            B_expr = reconstruct_from_observed(h_prob, var_clean, order, :Sin)
         end
+        phasor_re = A_expr
+        phasor_im = -B_expr
     end
 
-    if output_type == :magnitude
-        return abs.(phasor)
-    elseif output_type == :phase
-        return angle.(phasor)
-    else
+    all_vmap_syms = collect(values(vmap))
+    param_vec     = collect(parameters(sys))
+    all_vars_uw   = vcat(Symbolics.unwrap.(all_vmap_syms), Symbolics.unwrap.(param_vec))
+
+    #Compile build_function 
+    f_re = Symbolics.build_function(Symbolics.unwrap(phasor_re), all_vars_uw; expression=Val{false})
+    f_im = Symbolics.build_function(Symbolics.unwrap(phasor_im), all_vars_uw; expression=Val{false})
+
+    # Return closure for fast numeric evaluation ─
+    n_vmap   = length(all_vmap_syms)
+    n_params = length(param_vec)
+
+    # Pre-compute fixed parameter values
+    param_vals = zeros(Float64, n_params)
+    for (j, p) in enumerate(param_vec)
+        val = _find_sym(Num(p), h_prob.params)
+        val !== nothing && (param_vals[j] = Float64(val))
+    end
+
+    return function(sweep_res::HarmonicResult)
+        n_points = length(sweep_res.sweep_vals)
+        input_vec = zeros(Float64, n_vmap + n_params)
+
+        # Fill fixed parameter values
+        input_vec[n_vmap+1:end] .= param_vals
+
+        # Pre-build lookup: for each vmap symbol, find its result vector.
+        # Uses _find_sym (string-based fallback) to bridge the symbol identity
+        # gap between harmonic_equation's symbols and the compiled system's.
+        # Dropped/unconstrained vars → nothing → treated as 0.0
+        vmap_vecs = Vector{Union{Nothing, Vector{Float64}}}(undef, n_vmap)
+        for (j, sym) in enumerate(all_vmap_syms)
+            vmap_vecs[j] = _find_sym(sym, sweep_res.results)
+        end
+
+        # Locate sweep parameter index in param section
+        sweep_j = nothing
+        sweep_str = clean_name(sweep_res.sweep_var)
+        for (j, p) in enumerate(param_vec)
+            if clean_name(p) == sweep_str
+                sweep_j = j; break
+            end
+        end
+
+        phasor = Vector{ComplexF64}(undef, n_points)
+        for i in 1:n_points
+            for j in 1:n_vmap
+                input_vec[j] = vmap_vecs[j] !== nothing ? vmap_vecs[j][i] : 0.0
+            end
+            sweep_j !== nothing && (input_vec[n_vmap + sweep_j] = sweep_res.sweep_vals[i])
+            phasor[i] = complex(f_re(input_vec), f_im(input_vec))
+        end
         return phasor
     end
 end
 
 """
-    reconstruct_from_observed(h_prob, sweep_res, var_name, order, component) -> Vector{Float64}
+    reconstruct_from_observed(h_prob, var_name, order, component) -> Num
 
-Extract a harmonic coefficient for an **observed** (algebraically-defined) variable
-across a parameter sweep by symbolically reconstructing the variable's time-domain
-expression and then projecting it onto the requested harmonic.
+Return a **symbolic expression** for the requested harmonic coefficient of an
+observed (algebraically-defined) variable.
+
+The expression is written purely in terms of HB system unknowns and parameters,
+ready to be compiled via `Symbolics.build_function` by the caller (`get_harmonic`).
 
 # Arguments
-- `h_prob::HarmonicProblem`: The harmonic balance problem containing the system definition,
-  variable map, and sweep parameters.
-- `sweep_res::HarmonicResult`: The solution returned by the HB solver, containing the
-  sweep variable, sweep values, and result arrays for each HB unknown.
-- `var_name::String`: Name of the observed variable to reconstruct (matched after
-  cleaning to remove namespace prefixes).
-- `order::Int`: Harmonic order to extract. `0` gives the DC (constant) component;
-  `n ≥ 1` gives the n-th harmonic.
-- `component::Symbol`: Which quadrature to extract at `order ≥ 1`.
-  - `:Cos` — cosine coefficient  Aₙ
-  - `:Sin` — sine coefficient    Bₙ
+- `h_prob::HarmonicProblem`: The harmonic balance problem.
+- `var_name::String`: Name of the observed variable to reconstruct.
+- `order::Int`: Harmonic order (`0` = DC, `n ≥ 1` = n-th harmonic).
+- `component::Symbol`: `:Cos` or `:Sin`.
 
 # Returns
-A `Vector{Float64}` of length `length(sweep_res.sweep_vals)`, where each element is
-the requested harmonic coefficient of `var_name` evaluated at the corresponding sweep
-point.
-
-# Method
-1. Collects all observed equations (both from the `HarmonicSystem` and from
-   `ModelingToolkit.observed(sys)`) into a substitution dictionary.
-2. Locates `var_name` in the dictionary and recursively flattens any
-   observed-in-observed dependencies (up to 20 levels deep) so the expression is
-   written purely in terms of HB unknowns, parameters, and the time variable `t`.
-3. For each sweep point, builds the full time-domain harmonic ansatz
-       x(t) = A₀ + Σₙ Aₙ cos(nωt) + Bₙ sin(nωt)
-   for every original ODE state variable still present in the expression, using the
-   numerical HB results, then substitutes all parameters and HB unknowns.
-4. If `t` remains after substitution, the expression is symbolically expanded and the
-   target harmonic coefficient is isolated by setting all `cos(kωt)` and `sin(kωt)`
-   terms to zero except the one corresponding to `order` and `component`, which is set
-   to 1. The result is the coefficient of that trig term in the expanded expression.
-
-# Errors
-- Throws an error if `var_name` is not found in the observed equations.
-- Throws an error if the expression cannot be reduced to a numeric value at a sweep
-  point (i.e. unresolved symbolic variables remain after all substitutions).
+A `Num` symbolic expression.
 """
-function reconstruct_from_observed(h_prob::HarmonicProblem, sweep_res::HarmonicResult, var_name::String, order::Int, component::Symbol)
+function reconstruct_from_observed(h_prob::HarmonicProblem, var_name::String, order::Int, component::Symbol)
     sys = h_prob.harmonic_system.complete_sys
     t_sym = h_prob.harmonic_system.t_var
     tvar_uw = Symbolics.unwrap(t_sym)
@@ -573,7 +545,6 @@ function reconstruct_from_observed(h_prob::HarmonicProblem, sweep_res::HarmonicR
     for eq in observed(sys)
         obs_dict[Symbolics.unwrap(eq.lhs)] = Symbolics.unwrap(eq.rhs)
     end
-
     # Find target variable
     var_name_clean = clean_name(var_name)
     target_sym = nothing
@@ -591,7 +562,7 @@ function reconstruct_from_observed(h_prob::HarmonicProblem, sweep_res::HarmonicR
     states_set = Set(Symbolics.unwrap(v) for v in unknowns(sys))
     params_set = Set(Symbolics.unwrap(p) for p in parameters(sys))
 
-    # Flatten observed-in-observed dependencies 
+    # Flatten observed-in-observed dependencies
     for _ in 1:20
         vars_in_expr = Symbolics.get_variables(expr)
         unknown_vars = filter(v -> !in(v, states_set) && !in(v, params_set) && !isequal(v, tvar_uw), vars_in_expr)
@@ -609,9 +580,10 @@ function reconstruct_from_observed(h_prob::HarmonicProblem, sweep_res::HarmonicR
         expr = Symbolics.substitute(expr, subs)
         expr = Symbolics.expand_derivatives(expr)
     end
-    # Identify original ODE state variables still present in expr 
+
+    # Identify original ODE state variables still present in expr
     orig_state_names = Set(k[1] for k in keys(h_prob.harmonic_system.variable_map))
-    orig_state_map = Dict{Any, Tuple{String, Int}}()  # symbolic_var => (state_name, deriv_order)
+    orig_state_map = Dict{Any, Tuple{String, Int}}()
     for v in Symbolics.get_variables(expr)
         in(v, states_set) && continue
         in(v, params_set) && continue
@@ -636,95 +608,58 @@ function reconstruct_from_observed(h_prob::HarmonicProblem, sweep_res::HarmonicR
     end
 
     vmap = h_prob.harmonic_system.variable_map
-    param_vec = collect(parameters(sys))
     ωvar_sym = h_prob.harmonic_system.ω_var
     N = h_prob.harmonic_system.N
-    base_params = h_prob.params
-    sweep_idx = findfirst(isequal(sweep_res.sweep_var), param_vec)
 
-    n_points = length(sweep_res.sweep_vals)
-    out_vals = zeros(Float64, n_points)
+    # Build symbolic ansatz substitution 
+    # Use _get_coeff_expr to pre-resolve any vmap symbols that were eliminatedby mtkcompile 
+    ansatz_subs = Dict{Any, Any}()
+    for (orig_var, (orig_name, deriv_order)) in orig_state_map
+        x_t = dx_t = ddx_t = Num(0.0)
 
-    for i in 1:n_points
-        p_dict = Dict{Any, Any}(Symbolics.unwrap(p) => base_params[p] for p in param_vec)
-        sweep_idx !== nothing && (p_dict[Symbolics.unwrap(sweep_res.sweep_var)] = sweep_res.sweep_vals[i])
+        key_dc = find_varmap_key(vmap, orig_name, 0, :Cos)
+        key_dc !== nothing && (x_t += _get_coeff_expr(vmap[key_dc], h_prob))
 
-        ω_val = Float64(Symbolics.unwrap(Symbolics.substitute(Symbolics.unwrap(ωvar_sym), p_dict)))
-        T_period = 2π / ω_val
-
-        subs = Dict{Any, Any}(p_dict)
-
-        # HB system unknowns → their numeric values from results
-        for state_j in collect(unknowns(sys))
-            state_j_uw = Symbolics.unwrap(state_j)
-            haskey(sweep_res.results, state_j) && (subs[state_j_uw] = sweep_res.results[state_j][i])
+        for n in 1:N
+            key_c = find_varmap_key(vmap, orig_name, n, :Cos)
+            key_s = find_varmap_key(vmap, orig_name, n, :Sin)
+            An = key_c !== nothing ? _get_coeff_expr(vmap[key_c], h_prob) : Num(0.0)
+            Bn = key_s !== nothing ? _get_coeff_expr(vmap[key_s], h_prob) : Num(0.0)
+            nω = n * ωvar_sym
+            x_t   +=  An * cos(nω * t_sym) + Bn * sin(nω * t_sym)
+            dx_t  += -An * nω * sin(nω * t_sym) + Bn * nω * cos(nω * t_sym)
+            ddx_t += -An * nω^2 * cos(nω * t_sym) - Bn * nω^2 * sin(nω * t_sym)
         end
 
-        # Original ODE state variables 
-        for (orig_var, (orig_name, deriv_order)) in orig_state_map
-            x_t   = Num(0.0)
-            dx_t  = Num(0.0)
-            ddx_t = Num(0.0)
+        ansatz_subs[orig_var] = Symbolics.unwrap(
+            deriv_order == 0 ? x_t : deriv_order == 1 ? dx_t : ddx_t)
+    end
 
-            # Look up a harmonic coefficient from results; default to 0.0 if the
-            # symbol was eliminated during compilation (e.g. DC forced to zero).
-            lookup = sym -> begin
-                haskey(sweep_res.results, sym) && return sweep_res.results[sym][i]
-                sym_str = clean_name(sym)
-                for (k, v) in sweep_res.results
-                    (isequal(k, sym) || clean_name(k) == sym_str) && return v[i]
-                end
-                return 0.0
+    # Substitute symbolic ansatz into expression
+    val_t = Symbolics.substitute(expr, ansatz_subs)
+    val_t = Symbolics.expand_derivatives(val_t)
+
+    # ── Isolate the target harmonic component ──
+    remaining = Symbolics.get_variables(val_t)
+    if any(isequal(v, tvar_uw) for v in remaining)
+        val_expanded = Symbolics.expand(val_t)
+        isolate = Dict{Any, Any}()
+        for k in 1:(2*N+1)
+            cos_k = Symbolics.unwrap(cos(Num(k) * ωvar_sym * t_sym))
+            sin_k = Symbolics.unwrap(sin(Num(k) * ωvar_sym * t_sym))
+            if k == order
+                isolate[cos_k] = (component == :Cos ? 1.0 : 0.0)
+                isolate[sin_k] = (component == :Sin ? 1.0 : 0.0)
+            else
+                isolate[cos_k] = 0.0
+                isolate[sin_k] = 0.0
             end
-
-            key_dc = find_varmap_key(vmap, orig_name, 0, :Cos)
-            key_dc !== nothing && (x_t += lookup(vmap[key_dc]))
-
-            for n in 1:N
-                key_c = find_varmap_key(vmap, orig_name, n, :Cos)
-                key_s = find_varmap_key(vmap, orig_name, n, :Sin)
-                An = key_c !== nothing ? lookup(vmap[key_c]) : 0.0
-                Bn = key_s !== nothing ? lookup(vmap[key_s]) : 0.0
-                nω = n * ω_val
-                x_t   +=  An * cos(nω * t_sym) + Bn * sin(nω * t_sym)
-                dx_t  += -An * nω * sin(nω * t_sym) + Bn * nω * cos(nω * t_sym)
-                ddx_t += -An * nω^2 * cos(nω * t_sym) - Bn * nω^2 * sin(nω * t_sym)
-            end
-
-            subs[orig_var] = Symbolics.unwrap(
-                deriv_order == 0 ? x_t : deriv_order == 1 ? dx_t : ddx_t)
         end
+        final_expr = Symbolics.substitute(Symbolics.unwrap(val_expanded), isolate)
+    else
+        final_expr = val_t
+    end
 
-        # Substitute parameters, HB unknowns, and full state ansatz
-        val_t = Symbolics.substitute(expr, subs)
-        val_t = Symbolics.expand_derivatives(val_t)
-        #double check with will
-        remaining = Symbolics.get_variables(val_t)
-        if any(isequal(v, tvar_uw) for v in remaining)
-            val_expanded = Symbolics.expand(val_t)
-            
-            # Build substitution: zero all trig terms except the target
-            isolate = Dict{Any, Any}()
-            for k in 1:(2*N+1)
-                kω = k * ω_val
-                cos_k = Symbolics.unwrap(cos(Num(kω) * t_sym))
-                sin_k = Symbolics.unwrap(sin(Num(kω) * t_sym))
-                if k == order
-                    isolate[cos_k] = (component == :Cos ? 1.0 : 0.0)
-                    isolate[sin_k] = (component == :Sin ? 1.0 : 0.0)
-                else
-                    isolate[cos_k] = 0.0
-                    isolate[sin_k] = 0.0
-                end
-            end
-            
-            out_vals[i] = Float64(Symbolics.unwrap(
-                Symbolics.substitute(Symbolics.unwrap(val_expanded), isolate)))
-        else
-            out_vals[i] = Float64(Symbolics.unwrap(val_t))
-        end
-    end  # for i in 1:n_points
-
-    return out_vals
+    return Num(final_expr)
 end
-    
+  
