@@ -32,7 +32,7 @@ p1 = jls.plot(tsol[jls.C1.i][end-400:end], title = "Transient Time Plot", xlabel
 
 # Create a copy of parameters for the sweep
 sweep_params = copy(ps)
-sweep_params[jls.P1.Isrc.I] = 0.00565e-6 # Specific current for this test
+sweep_params[jls.P1.Isrc.I] = 0.00165e-6 # Specific current for this test
 sweep_params[jls.J1.R] = 1e9  
 
 

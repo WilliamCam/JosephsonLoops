@@ -435,11 +435,9 @@ phase  = angle.(extract_I(sweep_res))
 - `order::Int`: Harmonic order to extract. `0` = DC, `n ≥ 1` = n-th harmonic.
 """
 function get_harmonic(h_prob::HarmonicProblem, var_name::String, order::Int)
-
     var_clean = clean_name(var_name)
     vmap = h_prob.harmonic_system.variable_map
     sys  = h_prob.harmonic_system.complete_sys
-
     #Build symbolic phasor expression using raw vmap symbols 
     if order == 0
         key = find_varmap_key(vmap, var_clean, 0, :Cos)
