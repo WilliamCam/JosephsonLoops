@@ -35,29 +35,26 @@ sweep_params = copy(ps)
 sweep_params[jls.P1.Isrc.I] = 0.00565e-6 # Specific current for this test
 sweep_params[jls.J1.R] = 1e9  
 
-#create the HarmonicProblem and HarmonicSweepProblem
-@time h_prob = jls.HarmonicProblem(model, jls.P1.Isrc.ω, sweep_params ;tearing = true, N=2)
-@time sweep_prob = jls.HarmonicSweepProblem(h_prob, jls.P1.Isrc.ω, ω_vec)
+
+# Build HarmonicSystem once (expensive symbolic expansion, shared across problems)
+@time h_sys = jls.HarmonicSystem(model, jls.P1.Isrc.ω; tearing=true, N=1)
+
+# Sweep problem — sweep_var/sweep_vals live in HarmonicProblem
+h_prob = jls.HarmonicProblem(h_sys, sweep_params;
+    sweep_var=jls.P1.Isrc.ω, sweep_vals=ω_vec)
+
+# Solve
+@time sweep_res = jls.solve(h_prob)
 
 
-# Solve the harmonic balance problem over the frequency sweep and the fundamental harmonic balance problem
-@time sweep_res = jls.solve(sweep_prob)
-@time h_prob_res = jls.solve(h_prob)
+current_p_mag = abs.(jls.get_harmonic(h_prob, "P1₊dθ",  1)(sweep_res))
+theta_p_mag   = abs.(jls.get_harmonic(h_prob, "P1₊i", 1)(sweep_res))
 
 
-@time current_p_mag = jls.get_harmonic(h_prob, sweep_res, "P1₊i", 2; output_type=:magnitude)
-@time theta_p_mag = jls.get_harmonic(h_prob, sweep_res, "P1₊dθ", 2; output_type=:magnitude)
-
-# obs variables C1.i and J1.i
-@time c1_i_mag = jls.get_harmonic(h_prob, sweep_res, "C1₊i", 1; output_type=:magnitude)
-@time j1_i_mag = jls.get_harmonic(h_prob, sweep_res, "J1₊i", 1; output_type=:magnitude)
-
-Ii = @. (0.00565e-6 - current_p_mag)
-Vi = @. (jls.Φ₀ / (2*pi) * theta_p_mag) 
-
+Ii = @. (0.00565e-6 - theta_p_mag)
+Vi = @. (jls.Φ₀ / (2*pi) * current_p_mag) 
 # Calculate Power Waves (a = incident, b = reflected)
 Z0 = 50.0
 ai = @. 0.5 * (Vi + Z0 * Ii) / sqrt(Z0)
 bi = @. 0.5 * (Vi - Z0 * Ii) / sqrt(Z0)
-
 p = jls.plot(ω_vec/(2*pi), 20*log10.(abs.(bi./ai)), xlabel="Frequency (Hz)", ylabel="S11 (dB)", title="RLC S-Parameter", lw=2)
