@@ -19,7 +19,6 @@ struct HarmonicProblem
     u0::Vector{Float64}
 end
 
-
 struct HarmonicResult
     sweep_var::Num
     sweep_vals::AbstractVector
@@ -251,31 +250,6 @@ function HarmonicSystem(sys, ωvar::Num; tearing::Bool=true, N::Int=1)
     return HarmonicSystem(complete_sys, ωvar, tvar, N, variable_map, observed_eqs)
 end
 
-"""
-    HarmonicProblem(harmonic_sys, params; sweep_var=nothing, sweep_vals=nothing) -> HarmonicProblem
-    HarmonicProblem(sys, ωvar, params; tearing=true, N=1, sweep_var=nothing, sweep_vals=nothing) -> HarmonicProblem
-
-Construct a `HarmonicProblem` from either a pre-built `HarmonicSystem` or directly
-from a time-domain ODE system (which will be expanded into a `HarmonicSystem` internally).
-
-Prefer passing a pre-built `HarmonicSystem` when solving multiple times with different
-parameters, so the (potentially expensive) harmonic expansion is not repeated.
-
-# Arguments
-- `harmonic_sys::HarmonicSystem`: A pre-built harmonic system (first method).
-- `sys::ModelingToolkit.AbstractSystem`: The time-domain ODE system to expand (second method).
-- `ωvar::Num`: Symbolic variable for the fundamental angular frequency ω (second method only).
-- `params`: Parameter map from symbolic variables to numeric values (e.g. `Dict(ω => 1.0, R => 50.0)`).
-
-# Keywords
-- `sweep_var::Union{Num,Nothing}=nothing`: Parameter to sweep over.
-- `sweep_vals::Union{AbstractVector,Nothing}=nothing`: Values for the sweep parameter.
-- `N::Int=1`: Harmonic truncation order — second method only, passed to `HarmonicSystem`.
-- `tearing::Bool=true`: Whether to structurally simplify via `mtkcompile` — second method only.
-
-# Returns
-A `HarmonicProblem` ready to be passed to `solve`.
-"""
 function HarmonicProblem(harmonic_sys::HarmonicSystem, params; sweep_var::Union{Num, Nothing}=nothing, sweep_vals::Union{AbstractVector, Nothing}=nothing)
     u0 = fill(0.0, length(unknowns(harmonic_sys.complete_sys)))
     return HarmonicProblem(harmonic_sys, params, sweep_var, sweep_vals, u0)
