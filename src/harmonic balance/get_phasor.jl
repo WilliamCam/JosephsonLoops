@@ -1,6 +1,6 @@
 # Extracts numeric phasor A - im B from Harmonic balance result for some order in ω
 using ModelingToolkit
-include("./HB_utils.jl")
+#include("./utils.jl")
 #  Shared Helpers
 
 function get_phasor(h_prob::HarmonicProblem, result::HarmonicResult, var_name::String, order::Int = 1)
