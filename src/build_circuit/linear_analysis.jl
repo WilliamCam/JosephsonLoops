@@ -17,7 +17,7 @@ diff_eq = Differential(t)(Differential(t)(x)) + ω0^2*x + α*x^3 + η*Differenti
 Nharmonics = 1
 
 #Collocation HB (this is different from Kosata 2022 / HarmonicBalance.jl)
-harmonic_sys, harmonic_states, jac = JosephsonLoops.harmonic_equation(diff_eq, x, t, ω, Nharmonics, jac=true)
+harmonic_sys, harmonic_states, _, jac = JosephsonLoops.harmonic_equation(diff_eq, x, t, ω, Nharmonics, jac=true)
 
 #Tearing using MTK
 sys =  mtkcompile(harmonic_sys)
