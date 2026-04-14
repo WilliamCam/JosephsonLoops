@@ -5,6 +5,7 @@ using QuestBase
 using DifferentialEquations
 using Plots
 using JosephsonLoops
+using Revise
 #Linear analysis adapted from Kosata 2022 thesis
 
 #set up example differential equation in time domain. We will use duffing oscillator example from p.59
