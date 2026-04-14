@@ -53,12 +53,11 @@ theta_p_mag   = (jls.get_phasor(h_prob, sweep_res, "P1₊dθ",  1))
 
 
 
-Ii = @. (0.00165e-6 - current_p_mag)
+Ii = @. (0.00565e-6 - current_p_mag)
 Vi = @. (jls.Φ₀ / (2*pi) * theta_p_mag) 
 # Calculate Power Waves (a = incident, b = reflected)
 Z0 = 50.0
 ai = @. 0.5 * (Vi + Z0 * Ii) / sqrt(Z0)
 bi = @. 0.5 * (Vi - Z0 * Ii) / sqrt(Z0)
 p = jls.plot(ω_vec/(2*pi), 20*log10.(abs.(bi./ai)), xlabel="Frequency (Hz)", ylabel="S11 (dB)", title="RLC S-Parameter", lw=2)
-p = jls.plot(ω_vec/(2*pi), (abs.(bi./ai)), xlabel="Frequency (Hz)", ylabel="S11 (dB)", title="RLC S-Parameter", lw=2)
 
