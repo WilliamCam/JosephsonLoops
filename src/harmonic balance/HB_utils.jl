@@ -1,5 +1,29 @@
 using Symbolics
 using SymbolicUtils
+using NonlinearSolve
+struct HarmonicSystem
+    complete_sys::ModelingToolkit.AbstractSystem
+    ω_var::Num
+    t_var::Num          # independent variable from the original ODE system
+    N::Int
+    variable_map::Dict{Tuple{String, Int, Symbol}, Num}
+    observed_equations::Dict{Any, Any}
+end
+
+struct HarmonicProblem
+    harmonic_system::HarmonicSystem
+    params::Dict
+    sweep_var::Union{Num, Nothing}
+    sweep_vals::Union{AbstractVector, Nothing}
+    u0::Vector{Float64}
+end
+
+
+struct HarmonicResult
+    sweep_var::Num
+    sweep_vals::AbstractVector
+    results::Dict{Num, Vector{Float64}}
+end
 
 function var_is_in(vars::Vector, target_var::SymbolicUtils.BasicSymbolic{Real})
     ret = false
@@ -91,7 +115,7 @@ function get_full_equations(model::ModelingToolkit.System, tvar::Num)
     remove_idxs = Int[]
     for (i,var) in enumerate(states)
         if var_is_in(diff2vars, var)
-            push!(remove_idxs, i)
+            push!(remove_idxs, i)   
         end
     end
     for i in reverse(remove_idxs)
@@ -121,6 +145,7 @@ function is_term(set, target_term)
     end
     return ret
 end
+
 
 function build_jacobians(rotated_system, vars, dvars)
     #TODO check ordering
@@ -184,3 +209,160 @@ function rotate_to_harmonic_frame(M, N, Nt, harmonic_system)
     return simplify.(rotated_system)
 end
 
+"""
+    HarmonicSystem(sys, ωvar; tearing=true, N=1) -> HarmonicSystem
+
+Construct a `HarmonicSystem` by applying the harmonic balance method to a
+time-domain ODE system.
+
+Each state variable `x(t)` is expanded into a truncated Fourier series
+    x(t) = A₀ + Σₙ₌₁ᴺ [Aₙ cos(nωt) + Bₙ sin(nωt)]
+and the ODE residual is projected onto each harmonic basis function, converting
+the differential equations into a set of nonlinear algebraic equations in the
+Fourier coefficients {A₀, Aₙ, Bₙ}.
+
+# Arguments
+- `sys`: A `ModelingToolkit.ODESystem` (or compatible system) containing the
+  time-domain differential equations.
+- `ωvar::Num`: Symbolic variable representing the fundamental angular frequency ω.
+  Must already be declared as a parameter in `sys`.
+
+# Keywords
+- `N::Int=1`: Harmonic truncation order. `N=1` retains only the fundamental; larger
+  values improve accuracy at the cost of a larger nonlinear system.
+- `tearing::Bool=true`: Whether to apply structural simplification (`mtkcompile`) to
+  the resulting `NonlinearSystem`. Tearing reduces the number of active unknowns and
+  typically speeds up the solve.
+
+# Returns
+A `HarmonicSystem` containing the compiled nonlinear system, frequency metadata,
+the variable map, and the original observed equations.
+
+# Details
+- The independent variable (time) is inferred automatically via
+  `ModelingToolkit.get_iv(sys)`.
+- If the expanded system is over-determined (more equations than unknowns — which
+  can occur when symmetry constraints force certain coefficients to zero), trailing
+  equations are dropped with a warning. The ordering is determined by
+  `harmonic_equation`, so inspect results carefully in this case.
+- Observed equations from `sys` are stored verbatim in `HarmonicSystem.observed_equations`
+  so that non-state quantities (e.g. branch currents, voltages across elements) can be
+  reconstructed from the HB solution without re-solving the system.
+"""
+function HarmonicSystem(sys, ωvar::Num; tearing::Bool=true, N::Int=1)
+    tvar = Num(ModelingToolkit.get_iv(sys))
+    eqs, states = get_full_equations(sys, tvar)
+
+    nonlinear_sys, _, variable_map = harmonic_equation(eqs, states, tvar, ωvar, N)
+    
+    sys_eqs = equations(nonlinear_sys)
+    sys_vars = unknowns(nonlinear_sys)
+    
+    if length(sys_eqs) > length(sys_vars)
+        n_drop = length(sys_eqs) - length(sys_vars)
+        @warn "System is overdetermined: $(length(sys_eqs)) equations for $(length(sys_vars)) variables. " *
+              "Dropping the last equation(s). Caution: This behavior depends on variable order."
+        sys_eqs = sys_eqs[1:end-n_drop]
+    end
+        
+    @named nonlinear_sys = NonlinearSystem(sys_eqs, sys_vars, parameters(sys))
+    complete_sys = tearing ? mtkcompile(nonlinear_sys; fully_determined=false) : nonlinear_sys
+    
+    # Store original observed equations to enable reconstruction of non-state variables (eg. C1.i)
+    observed_eqs = Dict{Any, Any}(eq.lhs => eq.rhs for eq in observed(sys))
+  
+    return HarmonicSystem(complete_sys, ωvar, tvar, N, variable_map, observed_eqs)
+end
+
+"""
+    HarmonicProblem(harmonic_sys, params; sweep_var=nothing, sweep_vals=nothing) -> HarmonicProblem
+    HarmonicProblem(sys, ωvar, params; tearing=true, N=1, sweep_var=nothing, sweep_vals=nothing) -> HarmonicProblem
+
+Construct a `HarmonicProblem` from either a pre-built `HarmonicSystem` or directly
+from a time-domain ODE system (which will be expanded into a `HarmonicSystem` internally).
+
+Prefer passing a pre-built `HarmonicSystem` when solving multiple times with different
+parameters, so the (potentially expensive) harmonic expansion is not repeated.
+
+# Arguments
+- `harmonic_sys::HarmonicSystem`: A pre-built harmonic system (first method).
+- `sys::ModelingToolkit.AbstractSystem`: The time-domain ODE system to expand (second method).
+- `ωvar::Num`: Symbolic variable for the fundamental angular frequency ω (second method only).
+- `params`: Parameter map from symbolic variables to numeric values (e.g. `Dict(ω => 1.0, R => 50.0)`).
+
+# Keywords
+- `sweep_var::Union{Num,Nothing}=nothing`: Parameter to sweep over.
+- `sweep_vals::Union{AbstractVector,Nothing}=nothing`: Values for the sweep parameter.
+- `N::Int=1`: Harmonic truncation order — second method only, passed to `HarmonicSystem`.
+- `tearing::Bool=true`: Whether to structurally simplify via `mtkcompile` — second method only.
+
+# Returns
+A `HarmonicProblem` ready to be passed to `solve`.
+"""
+function HarmonicProblem(harmonic_sys::HarmonicSystem, params; sweep_var::Union{Num, Nothing}=nothing, sweep_vals::Union{AbstractVector, Nothing}=nothing)
+    u0 = fill(0.0, length(unknowns(harmonic_sys.complete_sys)))
+    return HarmonicProblem(harmonic_sys, params, sweep_var, sweep_vals, u0)
+end
+"""
+    solve(prob::HarmonicProblem; kwargs...) -> NonlinearSolution | HarmonicResult
+
+Solve the harmonic balance system. If `sweep_var` and `sweep_vals` are set on the
+problem, performs a parameter sweep using continuation (warm-starting each point from
+the previous solution). Otherwise, solves at a single parameter point.
+
+All keyword arguments are forwarded to `ModelingToolkit.solve` (e.g. `alg`, `abstol`).
+
+# Returns
+- **No sweep**: A `NonlinearSolution` whose harmonic coefficients can be read via `sol[var]`.
+- **With sweep**: A `HarmonicResult` containing the swept parameter, sweep values, and
+  result arrays for each HB unknown.
+"""
+function solve(prob::HarmonicProblem; kwargs...)
+    hsys = prob.harmonic_system
+    sys = hsys.complete_sys
+    system_unknowns = unknowns(sys)
+
+    # no sweep
+    if prob.sweep_var === nothing || prob.sweep_vals === nothing
+        combined_args = merge(Dict(system_unknowns .=> prob.u0), prob.params)
+        nl_prob = NonlinearProblem(sys, combined_args)
+        return ModelingToolkit.solve(nl_prob; kwargs...)
+    end
+    #Sweep solve 
+    sweep_var = prob.sweep_var
+    sweep_vals = prob.sweep_vals
+
+    # Remove sweep variable from fixed params to avoid conflicts
+    current_params = copy(prob.params)
+    if haskey(current_params, sweep_var)
+        delete!(current_params, sweep_var)
+    end
+    sweep_var_uw = Symbolics.unwrap(sweep_var)
+    if haskey(current_params, sweep_var_uw)
+        delete!(current_params, sweep_var_uw)
+    end
+
+    current_params[sweep_var] = first(sweep_vals)
+    combined_args = merge(Dict(system_unknowns .=> prob.u0), current_params)
+    nl_prob = NonlinearProblem(sys, combined_args)
+
+    # Results containers
+    results = Dict{Num, Vector{Float64}}()
+    for v in system_unknowns
+        results[v] = Float64[]
+        sizehint!(results[v], length(sweep_vals))
+    end
+
+    println("Sweeping $(sweep_var) over $(length(sweep_vals)) points...")
+    last_u = nl_prob.u0
+
+    for val in sweep_vals
+        nl_prob = remake(nl_prob; u0 = last_u, p = [sweep_var => val])
+        sol = ModelingToolkit.solve(nl_prob, kwargs...)
+        last_u = sol.u
+        for (i, v) in enumerate(system_unknowns)
+            push!(results[v], sol.u[i])
+        end
+    end
+    return HarmonicResult(sweep_var, collect(sweep_vals), results)
+end

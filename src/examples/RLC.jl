@@ -1,4 +1,4 @@
-#In this example we model an nonlinear parallel RLC circuit driven by a voltage source
+﻿#In this example we model an parallel RLC circuit driven by a voltage source
 
 #Load JosephsonLoops package
 using JosephsonLoops 
