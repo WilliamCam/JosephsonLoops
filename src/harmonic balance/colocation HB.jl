@@ -105,7 +105,7 @@ function harmonic_equation(eqs, states, tvar, wvar, N; jac=false)
     end
     @named sys = NonlinearSystem(harmonic_system)
     if jac
-        rotated_system = rotate_to_harmonic_frame(N, Nt, d_harmonic_system)
+        rotated_system = rotate_to_harmonic_frame(M, N, Nt, d_harmonic_system)
         #TODO: Check orderiing for M>1 larger systems
         J0, J1 = build_jacobians(rotated_system, vars, dvars) 
         return sys, X, (J0, J1);
