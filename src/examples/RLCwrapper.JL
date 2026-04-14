@@ -1,3 +1,5 @@
+
+using Revise
 using JosephsonLoops
 
 const jls = JosephsonLoops
@@ -32,7 +34,7 @@ p1 = jls.plot(tsol[jls.C1.i][end-400:end], title = "Transient Time Plot", xlabel
 
 # Create a copy of parameters for the sweep
 sweep_params = copy(ps)
-sweep_params[jls.P1.Isrc.I] = 0.00165e-6 # Specific current for this test
+sweep_params[jls.P1.Isrc.I] = 0.00565e-6 # Specific current for this test
 sweep_params[jls.J1.R] = 1e9  
 
 
@@ -44,17 +46,18 @@ h_prob = jls.HarmonicProblem(h_sys, sweep_params;
     sweep_var=jls.P1.Isrc.ω, sweep_vals=ω_vec)
 
 # Solve
-@time sweep_res = jls.solve(h_prob)
+sweep_res = jls.solve(h_prob)
+
+current_p_mag = (jls.get_phasor(h_prob, sweep_res, "P1₊i",  1))
+theta_p_mag   = (jls.get_phasor(h_prob, sweep_res, "P1₊dθ",  1))
 
 
-current_p_mag = abs.(jls.get_harmonic(h_prob, "P1₊dθ",  1)(sweep_res))
-theta_p_mag   = abs.(jls.get_harmonic(h_prob, "P1₊i", 1)(sweep_res))
 
-
-Ii = @. (0.00565e-6 - theta_p_mag)
-Vi = @. (jls.Φ₀ / (2*pi) * current_p_mag) 
+Ii = @. (0.00565e-6 - current_p_mag)
+Vi = @. (jls.Φ₀ / (2*pi) * theta_p_mag) 
 # Calculate Power Waves (a = incident, b = reflected)
 Z0 = 50.0
 ai = @. 0.5 * (Vi + Z0 * Ii) / sqrt(Z0)
 bi = @. 0.5 * (Vi - Z0 * Ii) / sqrt(Z0)
 p = jls.plot(ω_vec/(2*pi), 20*log10.(abs.(bi./ai)), xlabel="Frequency (Hz)", ylabel="S11 (dB)", title="RLC S-Parameter", lw=2)
+

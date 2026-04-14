@@ -8,5 +8,6 @@ include("build_circuit/component_library.jl")
 include("build_circuit/circuit_model.jl")
 include("build_circuit/sim_utils.jl")
 include("harmonic balance/HB_utils.jl")
+include("harmonic balance/get_phasor.jl")
 include("harmonic balance/colocation HB.jl")
 end # module JLoop
