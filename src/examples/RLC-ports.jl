@@ -39,7 +39,7 @@ sweep_params[jls.J1.R] = 1e9
 
 
 # Build HarmonicSystem once (expensive symbolic expansion, shared across problems)
-@time h_sys = jls.HarmonicSystem(model, jls.P1.Isrc.ω; tearing=true, N=1)
+@time h_sys = jls.HarmonicSystem(model, jls.P1.Isrc.ω; N=1)
 
 # Sweep problem — sweep_var/sweep_vals live in HarmonicProblem
 h_prob = jls.HarmonicProblem(h_sys, sweep_params;
@@ -50,8 +50,6 @@ sweep_res = jls.solve(h_prob)
 
 current_p_mag = (jls.get_phasor(h_prob, sweep_res, "P1₊i",  1))
 theta_p_mag   = (jls.get_phasor(h_prob, sweep_res, "P1₊dθ",  1))
-
-
 
 Ii = @. (0.00565e-6 - current_p_mag)
 Vi = @. (jls.Φ₀ / (2*pi) * theta_p_mag) 
