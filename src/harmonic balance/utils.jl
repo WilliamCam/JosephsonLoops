@@ -351,6 +351,46 @@ function solve(prob::HarmonicProblem; kwargs...)
     end
     return HarmonicResult(sweep_var, collect(sweep_vals), results)
 end
+
+"""
+    solve(prob::LinearizedProblem) -> LinearizedResult
+
+Solve the linearized harmonic-balance system around the working point. At each `Ω` in
+`prob.Ω_vals`, form `mat = J0 - i(Ω-ωp) J1` (Kosata 2022, eq. 5.12) with `J0, J1`
+substituted at the working point, solve `mat \\ perturb`, and store the complex
+response of every harmonic coefficient.
+"""
+function solve(prob::LinearizedProblem)
+    h_sys = prob.harmonic_system
+
+    # Numeric substitution: working point + parameters + ω => ωp
+    sub_rules = merge(prob.params, prob.U₀, Dict(h_sys.ω_var => prob.ωp))
+    J0_num = ComplexF64.(Symbolics.value.(simplify.(substitute(h_sys.J0, sub_rules))))
+    J1_num = ComplexF64.(Symbolics.value.(simplify.(substitute(h_sys.J1, sub_rules))))
+
+    perturb_c = ComplexF64.(prob.perturb)
+    var_syms = _ordered_harmonic_vars(h_sys)
+
+    results = Dict{Num, Vector{ComplexF64}}()
+    for sym in var_syms
+        results[sym] = Vector{ComplexF64}(undef, length(prob.Ω_vals))
+    end
+
+    for (i, Ω) in enumerate(prob.Ω_vals)
+        mat = J0_num - 1im * (Ω - prob.ωp) * J1_num
+        # `pinv` instead of `\`: J0/J1 carry gauge-redundant zero columns (e.g. capacitor
+        # DC phase), making `mat` rank-deficient. Min-norm solution gives 0 along those
+        # gauge directions, which is the physically correct choice.
+        resp = pinv(mat) * perturb_c
+        for (j, sym) in enumerate(var_syms)
+            results[sym][i] = resp[j]
+        end
+    end
+
+    @variables Ω_signal
+    return LinearizedResult(Ω_signal, collect(prob.Ω_vals), results)
+end
+
 # Index of (var_name, order, component) in the J0/J1 column ordering.
 # State k uses letter pair (coeff_labels[2k-1], coeff_labels[2k]) — so 'A','C','E','G' map to states 1..4.
 # Within a state, ordering is [DC, cos₁, sin₁, cos₂, sin₂, …].
@@ -415,41 +455,3 @@ function LinearizedProblem(h_sys::HarmonicSystem, params::Dict, ωp::Real,
     return LinearizedProblem(h_sys, params, Float64(ωp), U₀, Ω_vals, perturb)
 end
 
-"""
-    solve(prob::LinearizedProblem) -> LinearizedResult
-
-Solve the linearized harmonic-balance system around the working point. At each `Ω` in
-`prob.Ω_vals`, form `mat = J0 - i(Ω-ωp) J1` (Kosata 2022, eq. 5.12) with `J0, J1`
-substituted at the working point, solve `mat \\ perturb`, and store the complex
-response of every harmonic coefficient.
-"""
-function solve(prob::LinearizedProblem)
-    h_sys = prob.harmonic_system
-
-    # Numeric substitution: working point + parameters + ω => ωp
-    sub_rules = merge(prob.params, prob.U₀, Dict(h_sys.ω_var => prob.ωp))
-    J0_num = ComplexF64.(Symbolics.value.(simplify.(substitute(h_sys.J0, sub_rules))))
-    J1_num = ComplexF64.(Symbolics.value.(simplify.(substitute(h_sys.J1, sub_rules))))
-
-    perturb_c = ComplexF64.(prob.perturb)
-    var_syms = _ordered_harmonic_vars(h_sys)
-
-    results = Dict{Num, Vector{ComplexF64}}()
-    for sym in var_syms
-        results[sym] = Vector{ComplexF64}(undef, length(prob.Ω_vals))
-    end
-
-    for (i, Ω) in enumerate(prob.Ω_vals)
-        mat = J0_num - 1im * (Ω - prob.ωp) * J1_num
-        # `pinv` instead of `\`: J0/J1 carry gauge-redundant zero columns (e.g. capacitor
-        # DC phase), making `mat` rank-deficient. Min-norm solution gives 0 along those
-        # gauge directions, which is the physically correct choice.
-        resp = pinv(mat) * perturb_c
-        for (j, sym) in enumerate(var_syms)
-            results[sym][i] = resp[j]
-        end
-    end
-
-    @variables Ω_signal
-    return LinearizedResult(Ω_signal, collect(prob.Ω_vals), results)
-end
