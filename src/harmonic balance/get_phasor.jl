@@ -3,7 +3,7 @@ using ModelingToolkit
 #include("./utils.jl")
 #  Shared Helpers
 
-function get_phasor(h_prob::HarmonicProblem, result::HarmonicResult, var_name::String, order::Int = 1)
+function get_phasor(h_prob::Union{HarmonicProblem, LinearizedProblem}, result::HarmonicResult, var_name::String, order::Int = 1)
     #TODO: parameterised or updated call to harmonic_expression to avoid recomputing output expression
     expr = get_harmonic_expression(h_prob, var_name, order)
     return apply_harmonic_expression(h_prob, expr[1], expr[2])(result)
@@ -135,7 +135,6 @@ function apply_harmonic_expression(h_prob::HarmonicProblem, expression_re::Num, 
         return phasor
     end
 end
-
 function reconstruct_from_observed(h_prob::HarmonicProblem, var_name::String, order::Int, component::Symbol)
     sys = h_prob.harmonic_system.complete_sys
     t_sym = h_prob.harmonic_system.t_var
@@ -159,6 +158,9 @@ function reconstruct_from_observed(h_prob::HarmonicProblem, var_name::String, or
         end
     end
     target_sym === nothing && error("Variable $var_name not found in observed equations. Available: $([clean_name(k) for k in keys(obs_dict)])")
+    println("[reconstruct_from_observed] target = \"$var_name\"  order=$order  component=$component")
+    println("  matched symbol: $target_sym")
+    println("  defining RHS:   $(obs_dict[target_sym])")
 
     # Start with the RHS of the observed equation
     expr = obs_dict[target_sym]
@@ -183,6 +185,7 @@ function reconstruct_from_observed(h_prob::HarmonicProblem, var_name::String, or
         expr = Symbolics.substitute(expr, subs)
         expr = Symbolics.expand_derivatives(expr)
     end
+    println("  flattened expr (only states + params + t remain):\n    $expr")
 
     # Identify original ODE state variables still present in expr
     orig_state_names = Set(k[1] for k in keys(h_prob.harmonic_system.variable_map))
@@ -214,7 +217,9 @@ function reconstruct_from_observed(h_prob::HarmonicProblem, var_name::String, or
     ωvar_sym = h_prob.harmonic_system.ω_var
     N = h_prob.harmonic_system.N
 
-    # Build symbolic ansatz substitution 
+    println("  states to expand into the harmonic ansatz: $(collect(values(orig_state_map)))")
+
+    # Build symbolic ansatz substitution
     # Use _get_coeff_expr to pre-resolve any vmap symbols that were eliminatedby mtkcompile 
     ansatz_subs = Dict{Any, Any}()
     for (orig_var, (orig_name, deriv_order)) in orig_state_map
@@ -241,8 +246,9 @@ function reconstruct_from_observed(h_prob::HarmonicProblem, var_name::String, or
     # Substitute symbolic ansatz into expression
     val_t = Symbolics.substitute(expr, ansatz_subs)
     val_t = Symbolics.expand_derivatives(val_t)
+    println("  after ansatz substitution + derivative expansion:\n    $val_t")
 
-    #  Isolate the target harmonic component 
+    #  Isolate the target harmonic component
     remaining = Symbolics.get_variables(val_t)
     if any(isequal(v, tvar_uw) for v in remaining)
         val_expanded = Symbolics.expand(val_t)
@@ -262,6 +268,7 @@ function reconstruct_from_observed(h_prob::HarmonicProblem, var_name::String, or
     else
         final_expr = val_t
     end
+    println("  final isolated expression: $final_expr\n")
 
     return Num(final_expr)
 end

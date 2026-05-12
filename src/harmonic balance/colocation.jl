@@ -47,6 +47,7 @@ function harmonic_equation(eqs, states, tvar, wvar, N; jac=false)
     if jac
         dvars = []
         vars = []
+        dyn_subs = Dict{Any, Any}()
     end
     # loop over each state varibale for multiple harmonic equations
     variable_map = Dict{Tuple{String, Int, Symbol}, Num}()
@@ -82,11 +83,11 @@ function harmonic_equation(eqs, states, tvar, wvar, N; jac=false)
                 get_derivatives=true, dAfourier = actual_dcos, dBfourier = actual_dsin
             )
       
-            d_harmonic_eqs = substitute(harmonic_eqs, Dict(
-                Differential(tvar)(Differential(tvar)(states[k])) => _d2Xdt2,
-                Differential(tvar)(states[k]) => _dXdt,
-                states[k] => harmonic_state)
-            )
+    
+            dyn_subs[Differential(tvar)(Differential(tvar)(states[k]))] = _d2Xdt2
+            dyn_subs[Differential(tvar)(states[k])]                     = _dXdt
+            dyn_subs[states[k]]                                         = harmonic_state
+
             append!(vars, _vars)
             append!(dvars,_dvars)
         end
@@ -102,6 +103,9 @@ function harmonic_equation(eqs, states, tvar, wvar, N; jac=false)
         harmonic_eqs = substitute(harmonic_eqs, Dict(Differential(tvar)(Differential(tvar)(states[k]))=>d2Xdt2))
         harmonic_eqs = substitute(harmonic_eqs, Dict(Differential(tvar)(states[k])=>dXdt))
         harmonic_eqs = substitute(harmonic_eqs, Dict(states[k]=>harmonic_state))
+    end
+    if jac
+        d_harmonic_eqs = substitute(eqs, dyn_subs)   # one-shot, multi-state-safe
     end
     Nt = 2*N+1
     for k in 1:M
