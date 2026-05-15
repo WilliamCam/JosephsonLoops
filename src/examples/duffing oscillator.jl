@@ -62,3 +62,5 @@ v_resp = lin_result.results[A1]
 out = abs.((u_resp .+ 1im .* v_resp) ./ 2)
 
 plot(Ω, abs.(out))
+
+lin_result

@@ -3,14 +3,12 @@ using SymbolicUtils
 using NonlinearSolve
 
 struct HarmonicSystem
-    complete_sys::ModelingToolkit.AbstractSystem
-    ω_var::Num
-    t_var::Num          # independent variable from the original ODE system
+    harmonic_system::ModelingToolkit.AbstractSystem
+    time_domain_system::ModelingToolkit.System
+    ω::Num
     N::Int
     variable_map::Dict{Tuple{String, Int, Symbol}, Num}
-    observed_equations::Dict{Any, Any}
-    J0::Matrix{Num}     # empty unless built with linear=true
-    J1::Matrix{Num}     # empty unless built with linear=true
+    jacobian::Union{Tuple{Matrix{Num}, Matrix{Num}},Nothing}
 end
 
 struct HarmonicProblem
@@ -244,7 +242,7 @@ the variable map, and the original observed equations.
   so that non-state quantities (e.g. branch currents, voltages across elements) can be
   reconstructed from the HB solution without re-solving the system.
 """
-function HarmonicSystem(sys, ωvar::Num; tearing::Bool=true, N::Int=1, linear::Bool=false)
+function HarmonicSystem(sys, ωvar::Num, N::Int; tearing::Bool=true, determine_jacobian::Bool=false)
     tvar = Num(ModelingToolkit.get_iv(sys))
     eqs, states = get_full_equations(sys, tvar)
 
@@ -254,38 +252,34 @@ function HarmonicSystem(sys, ωvar::Num; tearing::Bool=true, N::Int=1, linear::B
     eqs_arg    = length(states) == 1 ? eqs[1]         : eqs
     states_arg = length(states) == 1 ? Num(states[1]) : states
 
-    if linear
-        nonlinear_sys, _, variable_map, (J0, J1) = harmonic_equation(eqs_arg, states_arg, tvar, ωvar, N; jac=true)
+    if determine_jacobian
+        nonlinear_sys, _, variable_map, jac = harmonic_equation(eqs_arg, states_arg, tvar, ωvar, N; jac=true)
     else
         nonlinear_sys, _, variable_map = harmonic_equation(eqs_arg, states_arg, tvar, ωvar, N)
-        J0 = Matrix{Num}(undef, 0, 0)
-        J1 = Matrix{Num}(undef, 0, 0)
+        jac = nothing
     end
     
-    sys_eqs = equations(nonlinear_sys)
-    sys_vars = unknowns(nonlinear_sys)
+    sys_eqs, sys_vars = equations(nonlinear_sys), unknowns(nonlinear_sys)
     
     if length(sys_eqs) > length(sys_vars)
         n_drop = length(sys_eqs) - length(sys_vars)
-        @warn "System is overdetermined: $(length(sys_eqs)) equations for $(length(sys_vars)) variables. " *
+        @warn "Harmonic system is overdetermined: $(length(sys_eqs)) equations for $(length(sys_vars)) variables. " *
               "Dropping the last equation(s). Caution: This behavior depends on variable order."
         sys_eqs = sys_eqs[1:end-n_drop]
     end
         
-    # When skipping mtkcompile, MTK 10.x requires equations in `0 ~ residual` form;
-    # harmonic_equation produces `residual ~ 0`, so flip when we won't tear.
     sys_eqs_built = tearing ? sys_eqs : [0 ~ eq.lhs - eq.rhs for eq in sys_eqs]
+
     @named nonlinear_sys = NonlinearSystem(sys_eqs_built, sys_vars, parameters(sys))
     complete_sys = tearing ? mtkcompile(nonlinear_sys) : complete(nonlinear_sys)
     
-    # Store original observed equations to enable reconstruction of non-state variables (eg. C1.i)
-    observed_eqs = Dict{Any, Any}(eq.lhs => eq.rhs for eq in observed(sys))
+
     
-    return HarmonicSystem(complete_sys, ωvar, tvar, N, variable_map, observed_eqs, J0, J1)
+    return HarmonicSystem(complete_sys, sys, ωvar, N, variable_map, jac)
 end
 
 function HarmonicProblem(harmonic_sys::HarmonicSystem, params; sweep_var::Union{Num, Nothing}=nothing, sweep_vals::Union{AbstractVector, Nothing}=nothing)
-    u0 = fill(0.0, length(unknowns(harmonic_sys.complete_sys)))
+    u0 = fill(0.0, length(unknowns(harmonic_sys.harmonic_system)))
     return HarmonicProblem(harmonic_sys, params, sweep_var, sweep_vals, u0)
 end
 """
@@ -304,7 +298,7 @@ All keyword arguments are forwarded to `ModelingToolkit.solve` (e.g. `alg`, `abs
 """
 function solve(prob::HarmonicProblem; kwargs...)
     hsys = prob.harmonic_system
-    sys = hsys.complete_sys
+    sys = hsys.harmonic_system
     system_unknowns = unknowns(sys)
 
     # no sweep
@@ -365,10 +359,10 @@ function solve(prob::LinearizedProblem)
 
     # Numeric substitution: working point + parameters + ω => ωp
     sub_rules = merge(prob.params, prob.U₀, Dict(h_sys.ω_var => prob.ωp))
-    J0_num = ComplexF64.(Symbolics.value.(simplify.(substitute(h_sys.J0, sub_rules))))
-    J1_num = ComplexF64.(Symbolics.value.(simplify.(substitute(h_sys.J1, sub_rules))))
+    J₀ = substitute(h_sys.J0, sub_rules)
+    J₁ = substitute(h_sys.J1, sub_rules)
 
-    perturb_c = ComplexF64.(prob.perturb)
+    perturb_c = (prob.perturb)
     var_syms = _ordered_harmonic_vars(h_sys)
 
     results = Dict{Num, Vector{ComplexF64}}()
@@ -377,11 +371,9 @@ function solve(prob::LinearizedProblem)
     end
 
     for (i, Ω) in enumerate(prob.Ω_vals)
-        mat = J0_num - 1im * (Ω - prob.ωp) * J1_num
-        # `pinv` instead of `\`: J0/J1 carry gauge-redundant zero columns (e.g. capacitor
-        # DC phase), making `mat` rank-deficient. Min-norm solution gives 0 along those
-        # gauge directions, which is the physically correct choice.
-        resp = pinv(mat) * perturb_c
+        mat = J₀ - 1im * (Ω - prob.ωp) * J₁
+        #resp = pinv(mat) * perturb_c #Potnetially faster ? approximate method
+        resp = mat \ perturb_c
         for (j, sym) in enumerate(var_syms)
             results[sym][i] = resp[j]
         end

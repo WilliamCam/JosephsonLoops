@@ -3,10 +3,10 @@ using ModelingToolkit
 #include("./utils.jl")
 #  Shared Helpers
 
-function get_phasor(h_prob::Union{HarmonicProblem, LinearizedProblem}, result::HarmonicResult, var_name::String, order::Int = 1)
+function get_output(h_prob::Union{HarmonicProblem, LinearizedProblem}, result::HarmonicResult, var_name::String, order::Int = 1)
     #TODO: parameterised or updated call to harmonic_expression to avoid recomputing output expression
     expr = get_harmonic_expression(h_prob, var_name, order)
-    return apply_harmonic_expression(h_prob, expr[1], expr[2])(result)
+    return apply_harmonic_expression(h_prob, expr)(result)
 end
 
 """Strip `(t)` suffix and whitespace from a symbolic variable name."""
@@ -38,7 +38,7 @@ function _find_sym(sym::Num, dicts...)
 end
 
 function _get_coeff_expr(sym::Num, h_prob::HarmonicProblem)
-    sys = h_prob.harmonic_system.complete_sys
+    sys = h_prob.harmonic_system.harmonic_system
     # If sym is a system unknown, return it directly — it will be substituted numerically
     for u in unknowns(sys)
         isequal(u, sym) && return sym
@@ -86,12 +86,13 @@ function get_harmonic_expression(h_prob::HarmonicProblem, var_name::String, orde
     return phasor_re, phasor_im
 end
 
-function apply_harmonic_expression(h_prob::HarmonicProblem, expression_re::Num, expression_im::Num)
+function apply_harmonic_expression(h_prob::HarmonicProblem, expression::Tuple{Num,Num})
     vmap = h_prob.harmonic_system.variable_map
-    sys = h_prob.harmonic_system.complete_sys
+    sys = h_prob.harmonic_system.harmonic_system
     all_vmap_syms = collect(values(vmap))
     _params     = collect(parameters(sys))
     all_vars_uw   = vcat(Symbolics.unwrap.(all_vmap_syms), Symbolics.unwrap.(_params))
+    expression_re, expression_im = expression
 
     #Compile build_function 
     f_re = Symbolics.build_function(Symbolics.unwrap(expression_re), all_vars_uw; expression=Val{false})
@@ -135,13 +136,18 @@ function apply_harmonic_expression(h_prob::HarmonicProblem, expression_re::Num, 
         return phasor
     end
 end
-function reconstruct_from_observed(h_prob::HarmonicProblem, var_name::String, order::Int, component::Symbol)
-    sys = h_prob.harmonic_system.complete_sys
-    t_sym = h_prob.harmonic_system.t_var
+function reconstruct_from_observed(h_prob::HarmonicProblem,
+        var_name::String, order::Int, component::Symbol)
+    sys = h_prob.harmonic_system.harmonic_system
+    time_domain_system = h_prob.harmonic_system.time_domain_system
+
+    t_sym = ModelingToolkit.get_iv(time_domain_system)
     tvar_uw = Symbolics.unwrap(t_sym)
+    observed_equations = observed(time_domain_system)
 
     obs_dict = Dict{Any, Any}()
-    for (k, v) in h_prob.harmonic_system.observed_equations
+    #TODO: is dictioanry structure necessary ?
+    for (k, v) in Dict{Any, Any}(eq.lhs => eq.rhs for eq in observed_equations)
         obs_dict[Symbolics.unwrap(k)] = Symbolics.unwrap(v)
     end
     for eq in observed(sys)
@@ -214,7 +220,7 @@ function reconstruct_from_observed(h_prob::HarmonicProblem, var_name::String, or
     end
 
     vmap = h_prob.harmonic_system.variable_map
-    ωvar_sym = h_prob.harmonic_system.ω_var
+    ωvar_sym = h_prob.harmonic_system.ω
     N = h_prob.harmonic_system.N
 
     println("  states to expand into the harmonic ansatz: $(collect(values(orig_state_map)))")
