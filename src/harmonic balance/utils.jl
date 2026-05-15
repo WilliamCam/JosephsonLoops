@@ -9,6 +9,8 @@ struct HarmonicSystem
     N::Int
     variable_map::Dict{Tuple{String, Int, Symbol}, Num}
     observed_equations::Dict{Any, Any}
+    J0::Matrix{Num}     # empty unless built with linear=true
+    J1::Matrix{Num}     # empty unless built with linear=true
 end
 
 struct HarmonicProblem
@@ -23,6 +25,21 @@ struct HarmonicResult
     sweep_var::Num
     sweep_vals::AbstractVector
     results::Dict{Num, Vector{Float64}}
+end
+
+struct LinearizedProblem
+    harmonic_system::HarmonicSystem
+    params::Dict
+    ωp::Float64
+    U₀::Dict{Num, Float64}      # working point: every harmonic coefficient that appears in J0/J1
+    Ω_vals::AbstractVector
+    perturb::Vector{Float64}
+end
+
+struct LinearizedResult
+    sweep_var::Num
+    sweep_vals::AbstractVector
+    results::Dict{Num, Vector{ComplexF64}}
 end
 
 function var_is_in(vars::Vector, target_var::SymbolicUtils.BasicSymbolic{Real})
@@ -209,6 +226,8 @@ Fourier coefficients {A₀, Aₙ, Bₙ}.
 - `tearing::Bool=true`: Whether to apply structural simplification (`mtkcompile`) to
   the resulting `NonlinearSystem`. Tearing reduces the number of active unknowns and
   typically speeds up the solve.
+- `linear::Bool=false`: If `true`, also populate `J0`, `J1` (Kosata 2022, eq. 5.12)
+  via `harmonic_equation(...; jac=true)`. Otherwise those fields are left empty.
 
 # Returns
 A `HarmonicSystem` containing the compiled nonlinear system, frequency metadata,
@@ -225,11 +244,23 @@ the variable map, and the original observed equations.
   so that non-state quantities (e.g. branch currents, voltages across elements) can be
   reconstructed from the HB solution without re-solving the system.
 """
-function HarmonicSystem(sys, ωvar::Num; tearing::Bool=true, N::Int=1)
+function HarmonicSystem(sys, ωvar::Num; tearing::Bool=true, N::Int=1, linear::Bool=false)
     tvar = Num(ModelingToolkit.get_iv(sys))
     eqs, states = get_full_equations(sys, tvar)
 
-    nonlinear_sys, _, variable_map = harmonic_equation(eqs, states, tvar, ωvar, N)
+    # harmonic_equation's M==1 branch wraps `eqs = [eqs]`, expecting a scalar input.
+    # Unwrap here so we can pass Vectors uniformly from get_full_equations.
+    # `Num(states[1])` matches the prototype's input type, so `states[k]` indexing works inside.
+    eqs_arg    = length(states) == 1 ? eqs[1]         : eqs
+    states_arg = length(states) == 1 ? Num(states[1]) : states
+
+    if linear
+        nonlinear_sys, _, variable_map, (J0, J1) = harmonic_equation(eqs_arg, states_arg, tvar, ωvar, N; jac=true)
+    else
+        nonlinear_sys, _, variable_map = harmonic_equation(eqs_arg, states_arg, tvar, ωvar, N)
+        J0 = Matrix{Num}(undef, 0, 0)
+        J1 = Matrix{Num}(undef, 0, 0)
+    end
     
     sys_eqs = equations(nonlinear_sys)
     sys_vars = unknowns(nonlinear_sys)
@@ -241,13 +272,16 @@ function HarmonicSystem(sys, ωvar::Num; tearing::Bool=true, N::Int=1)
         sys_eqs = sys_eqs[1:end-n_drop]
     end
         
-    @named nonlinear_sys = NonlinearSystem(sys_eqs, sys_vars, parameters(sys))
-    complete_sys = tearing ? mtkcompile(nonlinear_sys) : nonlinear_sys
+    # When skipping mtkcompile, MTK 10.x requires equations in `0 ~ residual` form;
+    # harmonic_equation produces `residual ~ 0`, so flip when we won't tear.
+    sys_eqs_built = tearing ? sys_eqs : [0 ~ eq.lhs - eq.rhs for eq in sys_eqs]
+    @named nonlinear_sys = NonlinearSystem(sys_eqs_built, sys_vars, parameters(sys))
+    complete_sys = tearing ? mtkcompile(nonlinear_sys) : complete(nonlinear_sys)
     
     # Store original observed equations to enable reconstruction of non-state variables (eg. C1.i)
     observed_eqs = Dict{Any, Any}(eq.lhs => eq.rhs for eq in observed(sys))
     
-    return HarmonicSystem(complete_sys, ωvar, tvar, N, variable_map, observed_eqs)
+    return HarmonicSystem(complete_sys, ωvar, tvar, N, variable_map, observed_eqs, J0, J1)
 end
 
 function HarmonicProblem(harmonic_sys::HarmonicSystem, params; sweep_var::Union{Num, Nothing}=nothing, sweep_vals::Union{AbstractVector, Nothing}=nothing)
@@ -317,3 +351,107 @@ function solve(prob::HarmonicProblem; kwargs...)
     end
     return HarmonicResult(sweep_var, collect(sweep_vals), results)
 end
+
+"""
+    solve(prob::LinearizedProblem) -> LinearizedResult
+
+Solve the linearized harmonic-balance system around the working point. At each `Ω` in
+`prob.Ω_vals`, form `mat = J0 - i(Ω-ωp) J1` (Kosata 2022, eq. 5.12) with `J0, J1`
+substituted at the working point, solve `mat \\ perturb`, and store the complex
+response of every harmonic coefficient.
+"""
+function solve(prob::LinearizedProblem)
+    h_sys = prob.harmonic_system
+
+    # Numeric substitution: working point + parameters + ω => ωp
+    sub_rules = merge(prob.params, prob.U₀, Dict(h_sys.ω_var => prob.ωp))
+    J0_num = ComplexF64.(Symbolics.value.(simplify.(substitute(h_sys.J0, sub_rules))))
+    J1_num = ComplexF64.(Symbolics.value.(simplify.(substitute(h_sys.J1, sub_rules))))
+
+    perturb_c = ComplexF64.(prob.perturb)
+    var_syms = _ordered_harmonic_vars(h_sys)
+
+    results = Dict{Num, Vector{ComplexF64}}()
+    for sym in var_syms
+        results[sym] = Vector{ComplexF64}(undef, length(prob.Ω_vals))
+    end
+
+    for (i, Ω) in enumerate(prob.Ω_vals)
+        mat = J0_num - 1im * (Ω - prob.ωp) * J1_num
+        # `pinv` instead of `\`: J0/J1 carry gauge-redundant zero columns (e.g. capacitor
+        # DC phase), making `mat` rank-deficient. Min-norm solution gives 0 along those
+        # gauge directions, which is the physically correct choice.
+        resp = pinv(mat) * perturb_c
+        for (j, sym) in enumerate(var_syms)
+            results[sym][i] = resp[j]
+        end
+    end
+
+    @variables Ω_signal
+    return LinearizedResult(Ω_signal, collect(prob.Ω_vals), results)
+end
+
+# Index of (var_name, order, component) in the J0/J1 column ordering.
+# State k uses letter pair (coeff_labels[2k-1], coeff_labels[2k]) — so 'A','C','E','G' map to states 1..4.
+# Within a state, ordering is [DC, cos₁, sin₁, cos₂, sin₂, …].
+function _harmonic_var_index(h_sys::HarmonicSystem, var_name::String, order::Int, component::Symbol)
+    haskey(h_sys.variable_map, (var_name, 0, :Cos)) ||
+        error("Variable $var_name not found in variable_map")
+    dc_sym = h_sys.variable_map[(var_name, 0, :Cos)]
+    letter = string(Symbolics.unwrap(dc_sym))[1]
+    state_idx = (Int(letter) - Int('A')) ÷ 2 + 1
+    offset = order == 0 ? 0 : (component == :Cos ? 2*order - 1 : 2*order)
+    return (state_idx - 1) * (2*h_sys.N + 1) + offset + 1
+end
+
+# Enumerate all harmonic-coefficient symbols in J0/J1 column order.
+# State ordering is recovered from the letter assignment in variable_map values.
+function _ordered_harmonic_vars(h_sys::HarmonicSystem)
+    state_names = unique([k[1] for k in keys(h_sys.variable_map)])
+    sort!(state_names; by = name -> begin
+        sym = h_sys.variable_map[(name, 0, :Cos)]
+        Int(string(Symbolics.unwrap(sym))[1])
+    end)
+    var_syms = Num[]
+    for name in state_names
+        push!(var_syms, h_sys.variable_map[(name, 0, :Cos)])
+        for n in 1:h_sys.N
+            push!(var_syms, h_sys.variable_map[(name, n, :Cos)])
+            push!(var_syms, h_sys.variable_map[(name, n, :Sin)])
+        end
+    end
+    return var_syms
+end
+
+"""
+    LinearizedProblem(h_sys, params, ωp, U₀, Ω_vals;
+                      perturb_var, perturb_order=1, perturb_component=:Cos, perturb_amplitude=1.0)
+        -> LinearizedProblem
+
+Construct a linear-analysis problem around the working point `U₀` at pump frequency `ωp`.
+
+# Arguments
+- `h_sys::HarmonicSystem`: must be built with `linear=true` so `J0, J1` are populated.
+- `params::Dict`: parameter map. Must include the pump-frequency parameter set to `ωp`.
+- `ωp::Real`: pump frequency.
+- `U₀::Dict{Num, Float64}`: working-point value for every harmonic coefficient appearing in J0/J1.
+- `Ω_vals::AbstractVector`: small-signal frequency sweep.
+
+# Keywords (perturb spec)
+- `perturb_var::String`: name of the physical variable to perturb (e.g. `"P1₊i"`).
+- `perturb_order::Int=1`: harmonic order of the perturbation.
+- `perturb_component::Symbol=:Cos`: `:Cos` or `:Sin`.
+- `perturb_amplitude::Real=1.0`: kick magnitude.
+"""
+function LinearizedProblem(h_sys::HarmonicSystem, params::Dict, ωp::Real,
+                           U₀::Dict{Num, Float64}, Ω_vals::AbstractVector;
+                           perturb_var::String, perturb_order::Int=1,
+                           perturb_component::Symbol=:Cos, perturb_amplitude::Real=1.0)
+    isempty(h_sys.J0) && error("HarmonicSystem must be built with linear=true")
+    n_vars = size(h_sys.J0, 1)
+    perturb = zeros(Float64, n_vars)
+    idx = _harmonic_var_index(h_sys, perturb_var, perturb_order, perturb_component)
+    perturb[idx] = Float64(perturb_amplitude)
+    return LinearizedProblem(h_sys, params, Float64(ωp), U₀, Ω_vals, perturb)
+end
+
