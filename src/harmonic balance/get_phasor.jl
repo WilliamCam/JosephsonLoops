@@ -9,83 +9,6 @@ function get_output(h_prob::Union{HarmonicProblem, LinearizedProblem}, result::H
     return apply_harmonic_expression(h_prob, expr)(result)
 end
 
-"""Strip `(t)` suffix and whitespace from a symbolic variable name."""
-clean_name(x) = replace(string(x), "(t)" => "", " " => "")
-
-"""Find a matching key in a variable_map by exact or fuzzy name match."""
-function find_varmap_key(variable_map, vname, order, component)
-    haskey(variable_map, (vname, order, component)) && return (vname, order, component)
-    for k in keys(variable_map)
-        k[2] == order && k[3] == component && occursin(vname, k[1]) && return k
-    end
-    return nothing
-end
-
-"""Unified symbolic lookup across one or more Dicts. Tries hash, isequal, then string match."""
-function _find_sym(sym::Num, dicts...)
-    sym_uw = Symbolics.unwrap(sym)
-    sym_str = clean_name(sym)
-    for d in dicts
-        haskey(d, sym) && return d[sym]
-        for (k, v) in d
-            (isequal(k, sym) || isequal(Symbolics.unwrap(k), sym_uw)) && return v
-        end
-        for (k, v) in d
-            clean_name(k) == sym_str && return v
-        end
-    end
-    return nothing
-end
-
-function _get_coeff_expr(sym::Num, h_prob::HarmonicProblem)
-    sys = h_prob.harmonic_system.harmonic_system
-    # If sym is a system unknown, return it directly — it will be substituted numerically
-    for u in unknowns(sys)
-        isequal(u, sym) && return sym
-    end
-    # isequal can fail for array-indexed vars (different underlying array objects after
-    # mtkcompile).  Retry with string comparison, returning the COMPILED system's symbol
-    # so that build_function can map it to the correct input position.
-    sym_str = clean_name(sym)
-    for u in unknowns(sys)
-        clean_name(u) == sym_str && return Num(Symbolics.unwrap(u))
-    end
-    # sym was eliminated by tearing — find it in observed equations
-    for eq in observed(sys)
-        isequal(eq.lhs, sym) && return Num(Symbolics.unwrap(eq.rhs))
-    end
-    for eq in observed(sys)
-        clean_name(eq.lhs) == sym_str && return Num(Symbolics.unwrap(eq.rhs))
-    end
-    # Not found anywhere — return the symbol itself (may be zero-forced by structure)
-    @warn "_get_coeff_expr: could not resolve $(clean_name(sym)) — returning as-is. unknowns=$(clean_name.(unknowns(sys))), observed_lhs=$(clean_name.(eq.lhs for eq in observed(sys)))"
-    return sym
-end
-
-function get_harmonic_expression(h_prob::HarmonicProblem, var_name::String, order::Int)
-    var_clean = clean_name(var_name)
-    vmap = h_prob.harmonic_system.variable_map
-    #Build symbolic phasor expression using raw vmap symbols 
-    if order == 0
-        key = find_varmap_key(vmap, var_clean, 0, :Cos)
-        phasor_re = key !== nothing ? vmap[key] : reconstruct_from_observed(h_prob, var_clean, 0, :Cos)
-        phasor_im = Num(0.0)
-    else
-        key_cos = find_varmap_key(vmap, var_clean, order, :Cos)
-        key_sin = find_varmap_key(vmap, var_clean, order, :Sin)
-        if key_cos !== nothing && key_sin !== nothing
-            A_expr = vmap[key_cos]
-            B_expr = vmap[key_sin]
-        else
-            A_expr = reconstruct_from_observed(h_prob, var_clean, order, :Cos)
-            B_expr = reconstruct_from_observed(h_prob, var_clean, order, :Sin)
-        end
-        phasor_re = A_expr
-        phasor_im = B_expr
-    end
-    return phasor_re, phasor_im
-end
-
 function apply_harmonic_expression(h_prob::HarmonicProblem, expression::Tuple{Num,Num})
     vmap = h_prob.harmonic_system.variable_map
     sys = h_prob.harmonic_system.harmonic_system
@@ -136,6 +59,31 @@ function apply_harmonic_expression(h_prob::HarmonicProblem, expression::Tuple{Nu
         return phasor
     end
 end
+
+function get_harmonic_expression(h_prob::HarmonicProblem, var_name::String, order::Int)
+    var_clean = clean_name(var_name)
+    vmap = h_prob.harmonic_system.variable_map
+    #Build symbolic phasor expression using raw vmap symbols 
+    if order == 0
+        key = find_varmap_key(vmap, var_clean, 0, :Cos)
+        phasor_re = key !== nothing ? vmap[key] : reconstruct_from_observed(h_prob, var_clean, 0, :Cos)
+        phasor_im = Num(0.0)
+    else
+        key_cos = find_varmap_key(vmap, var_clean, order, :Cos)
+        key_sin = find_varmap_key(vmap, var_clean, order, :Sin)
+        if key_cos !== nothing && key_sin !== nothing
+            A_expr = vmap[key_cos]
+            B_expr = vmap[key_sin]
+        else
+            A_expr = reconstruct_from_observed(h_prob, var_clean, order, :Cos)
+            B_expr = reconstruct_from_observed(h_prob, var_clean, order, :Sin)
+        end
+        phasor_re = A_expr
+        phasor_im = B_expr
+    end
+    return phasor_re, phasor_im
+end
+
 function reconstruct_from_observed(h_prob::HarmonicProblem,
         var_name::String, order::Int, component::Symbol)
     sys = h_prob.harmonic_system.harmonic_system
@@ -248,6 +196,7 @@ function reconstruct_from_observed(h_prob::HarmonicProblem,
         ansatz_subs[orig_var] = Symbolics.unwrap(
             deriv_order == 0 ? x_t : deriv_order == 1 ? dx_t : ddx_t)
     end
+    print(ansatz_subs)
 
     # Substitute symbolic ansatz into expression
     val_t = Symbolics.substitute(expr, ansatz_subs)
@@ -278,4 +227,56 @@ function reconstruct_from_observed(h_prob::HarmonicProblem,
 
     return Num(final_expr)
 end
-  
+
+function _get_coeff_expr(sym::Num, h_prob::HarmonicProblem)
+    sys = h_prob.harmonic_system.harmonic_system
+    # If sym is a system unknown, return it directly — it will be substituted numerically
+    for u in unknowns(sys)
+        isequal(u, sym) && return sym
+    end
+    # isequal can fail for array-indexed vars (different underlying array objects after
+    # mtkcompile).  Retry with string comparison, returning the COMPILED system's symbol
+    # so that build_function can map it to the correct input position.
+    sym_str = clean_name(sym)
+    for u in unknowns(sys)
+        clean_name(u) == sym_str && return Num(Symbolics.unwrap(u))
+    end
+    # sym was eliminated by tearing — find it in observed equations
+    for eq in observed(sys)
+        isequal(eq.lhs, sym) && return Num(Symbolics.unwrap(eq.rhs))
+    end
+    for eq in observed(sys)
+        clean_name(eq.lhs) == sym_str && return Num(Symbolics.unwrap(eq.rhs))
+    end
+    # Not found anywhere — return the symbol itself (may be zero-forced by structure)
+    @warn "_get_coeff_expr: could not resolve $(clean_name(sym)) — returning as-is. unknowns=$(clean_name.(unknowns(sys))), observed_lhs=$(clean_name.(eq.lhs for eq in observed(sys)))"
+    return sym
+end
+
+"""Strip `(t)` suffix and whitespace from a symbolic variable name."""
+clean_name(x) = replace(string(x), "(t)" => "", " " => "")
+
+"""Find a matching key in a variable_map by exact or fuzzy name match."""
+function find_varmap_key(variable_map, vname, order, component)
+    haskey(variable_map, (vname, order, component)) && return (vname, order, component)
+    for k in keys(variable_map)
+        k[2] == order && k[3] == component && occursin(vname, k[1]) && return k
+    end
+    return nothing
+end
+
+"""Unified symbolic lookup across one or more Dicts. Tries hash, isequal, then string match."""
+function _find_sym(sym::Num, dicts...)
+    sym_uw = Symbolics.unwrap(sym)
+    sym_str = clean_name(sym)
+    for d in dicts
+        haskey(d, sym) && return d[sym]
+        for (k, v) in d
+            (isequal(k, sym) || isequal(Symbolics.unwrap(k), sym_uw)) && return v
+        end
+        for (k, v) in d
+            clean_name(k) == sym_str && return v
+        end
+    end
+    return nothing
+end
