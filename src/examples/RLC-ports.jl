@@ -2,6 +2,8 @@
 using Revise
 using JosephsonLoops
 using Symbolics
+using ModelingToolkit
+using BenchmarkTools
 
 const jls = JosephsonLoops
 loops = [
@@ -28,10 +30,10 @@ tspan = (0.0, 1e-6)
 tsol = jls.tsolve(model, u0, ps, tspan; guesses=guesses)
 p1 = jls.plot(tsol[jls.C1.i][end-400:end], title = "Transient Time Plot", xlabel = "t", ylabel = "I_C1")
 
-
+unknowns(model)[1]
 #hb Setup
 # Define the sweep range (8 to 10.0 GHz)
-ω_vec = 2*pi*(8:0.001:10.0)*1e9
+ω_vec = collect(2*pi*(8:0.001:10.0)*1e9)
 
 # Create a copy of parameters for the sweep
 sweep_params = copy(ps)
@@ -40,17 +42,16 @@ sweep_params[jls.J1.R] = 1e9
 
 
 # Build HarmonicSystem once (expensive symbolic expansion, shared across problems)
-@time h_sys = jls.HarmonicSystem(model, jls.P1.Isrc.ω; N=1, linear=true, tearing = true)
+@time h_sys = jls.HarmonicSystem(model, jls.P1.Isrc.ω, 1, determine_jacobian=true)
 
 # Sweep problem — sweep_var/sweep_vals live in HarmonicProblem
-h_prob = jls.HarmonicProblem(h_sys, sweep_params;
-    sweep_var=jls.P1.Isrc.ω, sweep_vals=ω_vec)
-
+ h_prob = jls.HarmonicProblem(h_sys, sweep_params;
+    swept_parameters=Dict(jls.P1.Isrc.ω => ω_vec))
 # Solve
-sweep_res = jls.solve(h_prob)
+@btime sweep_res = jls.solve!(h_prob)
 
-current_p_mag = (jls.get_phasor(h_prob, sweep_res, "P1₊i",  1))
-theta_p_mag   = (jls.get_phasor(h_prob, sweep_res, "P1₊dθ",  1))
+current_p_mag = (jls.get_output(h_prob, sweep_res, "C1₊i",  1))
+theta_p_mag   = (jls.get_output(h_prob, sweep_res, "P1₊dθ",  1))
 
 Ii = @. (0.00565e-6 - current_p_mag)
 Vi = @. (jls.Φ₀ / (2*pi) * theta_p_mag) 

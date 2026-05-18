@@ -64,3 +64,9 @@ out = abs.((u_resp .+ 1im .* v_resp) ./ 2)
 plot(Ω, abs.(out))
 
 lin_result
+
+model = h_sys.complete_sys
+
+test = Dict{Any, Any}(eq.lhs => eq.rhs for eq in equations(model))
+
+ModelingToolkit.get_iv(duffing_model)

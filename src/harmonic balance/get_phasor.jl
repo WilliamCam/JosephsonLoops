@@ -3,8 +3,9 @@ using ModelingToolkit
 #include("./utils.jl")
 #  Shared Helpers
 
-function get_output(h_prob::Union{HarmonicProblem, LinearizedProblem}, result::HarmonicResult, var_name::String, order::Int = 1)
+function get_output(h_prob::Union{HarmonicProblem, LinearizedProblem}, var_name::String, order::Int = 1)
     #TODO: parameterised or updated call to harmonic_expression to avoid recomputing output expression
+    result = h_prob.result
     expr = get_harmonic_expression(h_prob, var_name, order)
     return apply_harmonic_expression(h_prob, expr)(result)
 end
