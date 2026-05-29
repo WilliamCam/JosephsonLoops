@@ -42,13 +42,12 @@ sweep_params[jls.J1.R] = 1e9
 
 
 # Build HarmonicSystem once (expensive symbolic expansion, shared across problems)
-@time h_sys = jls.HarmonicSystem(model, jls.P1.Isrc.ω, 1, determine_jacobian=true)
-
+@time h_sys = jls.HarmonicSystem(model, jls.P1.Isrc.ω, 1, determine_jacobian=false)
+h_sys
 # Sweep problem — sweep_var/sweep_vals live in HarmonicProblem
- h_prob = jls.HarmonicProblem(h_sys, sweep_params;
-    swept_parameters=Dict(jls.P1.Isrc.ω => ω_vec))
+ h_prob = jls.HarmonicProblem(h_sys, ω_vec, sweep_params)
 # Solve
-@btime sweep_res = jls.solve!(h_prob)
+sweep_res = jls.solve!(h_prob)
 
 current_p_mag = (jls.get_output(h_prob, sweep_res, "C1₊i",  1))
 theta_p_mag   = (jls.get_output(h_prob, sweep_res, "P1₊dθ",  1))
@@ -113,3 +112,12 @@ jls.plot(Ω_vals/(2*pi*1e9), 20*log10.(abs.(bi./ai)),
     title="JPA linearized S11 (LinearizedProblem)", lw=4, label="JosephsonLoops")
 
 
+arr1 = [1, 2, 3]
+arr2 = [:a, :b]
+
+# Creates an iterator of tuples
+combinations = Iterators.product(arr1, arr2)
+
+for (x, y) in combinations
+    println("Combination: $x, $y")
+end

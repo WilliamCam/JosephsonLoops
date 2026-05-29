@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["WilliamCam <78771433+WilliamCam@users.noreply.github.com>"]
 
 [deps]
+BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
 BifurcationKit = "0f109fa4-8a5d-4b75-95aa-f515264e7665"
 DataStructures = "864edb3b-99cc-5e75-8d2d-829cb0a9cfe8"
 DifferentialEquations = "0c46a032-eb83-5123-abaf-570d42b7fbaa"
@@ -20,6 +21,7 @@ SymbolicUtils = "d1185830-fcd6-423d-90d6-eec64667417b"
 Symbolics = "0c5d862f-8b57-4792-8d23-62f2024744c7"
 
 [compat]
+BenchmarkTools = "1.8.0"
 BifurcationKit = "0.5.2"
 DataStructures = "0.19.1"
 DifferentialEquations = "7.16.1"
