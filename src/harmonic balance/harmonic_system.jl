@@ -31,6 +31,7 @@ struct LinearisedProblem
     ω_sweep::Tuple{Num, Union{Float64,Vector{Float64}}}
     parameters::Dict
     parameter_sweep::Union{Dict{Num, Vector{Float64}},Nothing}
+    working_point::Dict{Num, Float64}
     ω_pump::Float64
     U_perturbation::Vector{Float64}
     result::HarmonicResult
@@ -76,15 +77,15 @@ function solve!(linear_problem::LinearisedProblem)
     if isnothing(linear_problem.parameter_sweep)
         println("Performing sweep $(ω) over $(length(ω_values)) points...")
         output_array = result.solution[ω]
-        numeric_substitution = merge(linear_problem.parameters, linear_problem.U₀, Dict(ω => linear_problem.ω_pump))
-        J₀ = substitute(linear_problem.jacobian[1], numeric_substitution)
-        J₁ = substitute(linear_problem.jacobian[2], numeric_substitution)
+        numeric_substitution = merge(linear_problem.parameters, linear_problem.working_point, Dict(ω => linear_problem.ω_pump))
+        J₀ = simplify(substitute(linear_problem.jacobian[1], numeric_substitution))
+        J₁ = simplify(substitute(linear_problem.jacobian[2], numeric_substitution))
 
         U_small_signal = (linear_problem.U_perturbation)
 
         for (column_index, Ω) in enumerate(ω_values)
             mat = J₀ - 1im * (Ω - linear_problem.ω_pump) * J₁
-            resp = mat \ perturb_c
+            resp = mat \ U_small_signal
             output_array[:, column_index] .= resp
         end
     else
@@ -172,11 +173,10 @@ function HarmonicProblem(harmonic_system::HarmonicSystem, ω_values::Union{Float
         pump_frequency, perturbation = linear_response
         working_prob = remake(nonlinear_prob; u0 = U₀, p = [harmonic_system.ω => pump_frequency])
         sol = ModelingToolkit.solve(working_prob, kwargs...)
-        working_point = sol.u
-        return LinearisedProblem(system.jacobian, ω_sweep, parameters, parameter_sweep, working_point, perturbation, output)
+        working_point = Dict(key => sol[key] for key in system_unknowns)
+        return LinearisedProblem(harmonic_system.jacobian, ω_sweep, parameters, parameter_sweep, working_point, pump_frequency, perturbation, output)
      end
 end
-
 
 function HarmonicSystem(sys, ωvar::Num, N::Int; tearing::Bool=true, determine_jacobian::Bool=false)
     tvar = Num(ModelingToolkit.get_iv(sys))
@@ -187,8 +187,8 @@ function HarmonicSystem(sys, ωvar::Num, N::Int; tearing::Bool=true, determine_j
     # `Num(states[1])` matches the prototype's input type, so `states[k]` indexing works inside.
     eqs_arg    = length(states) == 1 ? eqs[1]         : eqs
     states_arg = length(states) == 1 ? Num(states[1]) : states
-
     if determine_jacobian
+        print(eqs_arg)
         nonlinear_sys, _, variable_map, jac = harmonic_equation(eqs_arg, states_arg, tvar, ωvar, N; jac=true)
     else
         nonlinear_sys, _, variable_map = harmonic_equation(eqs_arg, states_arg, tvar, ωvar, N)

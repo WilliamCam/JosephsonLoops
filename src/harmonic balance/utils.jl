@@ -124,7 +124,7 @@ end
 function build_jacobians(rotated_system, vars, dvars)
     #TODO check ordering
     _jac = Symbolics.jacobian(rotated_system, vars)
-    jac_0 = Num.(simplify(substitute(_jac, Dict(dvars .=> 0))))
+    jac_0 = Num.((substitute(_jac, Dict(dvars .=> 0))))
     jac_1 = Symbolics.jacobian(rotated_system, dvars)
     return jac_0, jac_1
 end
@@ -155,6 +155,6 @@ function rotate_to_harmonic_frame(M, N, Nt, harmonic_system)
         col_range = (d-1)*Nt + 1 : d*Nt
         Γ_total[row_range, col_range] .= Γ_single
     end
-    rotated_system = Γ_total * [equation.lhs for equation in harmonic_system]    
-    return simplify.(rotated_system)
+    rotated_system = Γ_total * [equation.lhs for equation in harmonic_system]  
+    return (rotated_system)
 end

@@ -22,7 +22,8 @@ Nharmonics = 1
 duffing_model = mtkcompile(duffing_sys)
 
 # Build the harmonic system with linearization data populated (J0, J1)
-h_sys = jls.HarmonicSystem(duffing_model, ω; N=Nharmonics, linear=true)
+h_sys = jls.HarmonicSystem(duffing_model, ω, Nharmonics; determine_jacobian=true)
+
 
 # Harmonic-coefficient symbols from the variable_map
 A_dc = h_sys.variable_map[("x", 0, :Cos)]

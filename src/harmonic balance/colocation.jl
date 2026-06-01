@@ -128,7 +128,8 @@ function harmonic_equation(eqs, states, tvar, wvar, N; jac=false)
     if jac
         rotated_system = rotate_to_harmonic_frame(M, N, Nt, d_harmonic_system)
         #TODO: Check orderiing for M>1 larger systems
-        J0, J1 = build_jacobians(rotated_system, vars, dvars) 
+        J0, J1 = build_jacobians(rotated_system, vars, dvars)
+        #debugging
         return sys, X, variable_map, (J0, J1);
     else
         return sys, X, variable_map
