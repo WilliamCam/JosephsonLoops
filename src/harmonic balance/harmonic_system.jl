@@ -179,7 +179,6 @@ function HarmonicProblem(harmonic_system::HarmonicSystem, ω_values::Union{Float
      end
 end
 
-
 function HarmonicSystem(sys, ωvar::Num, N::Int; tearing::Bool=true, determine_jacobian::Bool=false)
     # J0/J1 are built against the un-teared coefficient set, so keep tearing off when they
     # are requested or the Jacobian columns won't line up with unknowns(system).
@@ -193,8 +192,8 @@ function HarmonicSystem(sys, ωvar::Num, N::Int; tearing::Bool=true, determine_j
     # `Num(states[1])` matches the prototype's input type, so `states[k]` indexing works inside.
     eqs_arg    = length(states) == 1 ? eqs[1]         : eqs
     states_arg = length(states) == 1 ? Num(states[1]) : states
-
     if determine_jacobian
+        print(eqs_arg)
         nonlinear_sys, _, variable_map, jac = harmonic_equation(eqs_arg, states_arg, tvar, ωvar, N; jac=true)
     else
         nonlinear_sys, _, variable_map = harmonic_equation(eqs_arg, states_arg, tvar, ωvar, N)

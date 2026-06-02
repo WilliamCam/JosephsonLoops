@@ -6,10 +6,11 @@ const jls = JosephsonLoops
 
 loops = [
 ["I1", "R1"],
-["R1", "C1", "J1"]
+["R1", "C1"],
+ ["L1","J1"]
 ]
 
-ext_flux = [false, true]
+ext_flux = [false, false, false]
 
 
 circuit = jls.process_netlist(loops, ext_flux=ext_flux)

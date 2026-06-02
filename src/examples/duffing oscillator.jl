@@ -25,6 +25,7 @@ duffing_model = mtkcompile(duffing_sys)
 h_sys = jls.HarmonicSystem(duffing_model, ω, Nharmonics; determine_jacobian=true)
 
 
+
 # Large-signal pump: sweep ω and solve the harmonic balance system. The same h_sys feeds
 # the linear response below; determine_jacobian=true (above) is what builds its Jacobians.
 ω_vec = collect(range(0.8, 1.2, 200))
