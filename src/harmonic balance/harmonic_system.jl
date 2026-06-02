@@ -19,6 +19,7 @@ struct HarmonicResult
 end
 
 struct HarmonicProblem
+    harmonic_system::HarmonicSystem
     problem::NonlinearSolve.NonlinearProblem
     ω_sweep::Tuple{Num, Union{Float64,Vector{Float64}}}
     parameters::Dict
@@ -169,7 +170,7 @@ function HarmonicProblem(harmonic_system::HarmonicSystem, ω_values::Union{Float
     system_parameters = merge(Dict(system_unknowns .=> U₀), parameters)
     nonlinear_prob = NonlinearProblem(system, system_parameters)
     if isnothing(linear_response)
-        return HarmonicProblem(nonlinear_prob, ω_sweep, parameters, parameter_sweep, U₀, output)
+        return HarmonicProblem(harmonic_system, nonlinear_prob, ω_sweep, parameters, parameter_sweep, U₀, output)
     else
         #TODO: Assert jacobian is generated for linear response
         pump_frequency, perturbation = linear_response
@@ -190,13 +191,15 @@ function HarmonicProblem(harmonic_system::HarmonicSystem, ω_values::Union{Float
 end
 
 function HarmonicSystem(sys, ωvar::Num, N::Int; tearing::Bool=true, determine_jacobian::Bool=false)
+    #TODO:Check if this is actually true
+
+    # J0/J1 are built against the un-teared coefficient set, so keep tearing off when they
+    # are requested or the Jacobian columns won't line up with unknowns(system).
+    determine_jacobian && (tearing = false)
+
     tvar = Num(ModelingToolkit.get_iv(sys))
     eqs, states = get_full_equations(sys, tvar)
 
-    # harmonic_equation's M==1 branch wraps `eqs = [eqs]`, expecting a scalar input.
-    # Unwrap here so we can pass Vectors uniformly from get_full_equations.
-    # `Num(states[1])` matches the prototype's input type, so `states[k]` indexing works inside.
-    eqs_arg    = length(states) == 1 ? eqs[1]         : eqs
     states_arg = length(states) == 1 ? Num(states[1]) : states
     if determine_jacobian
         nonlinear_sys, X, variable_map, jac = harmonic_equation(eqs_arg, states_arg, tvar, ωvar, N; jac=true)
