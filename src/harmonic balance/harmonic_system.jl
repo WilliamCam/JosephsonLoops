@@ -180,6 +180,8 @@ function HarmonicProblem(harmonic_system::HarmonicSystem, ω_values::Union{Float
 end
 
 function HarmonicSystem(sys, ωvar::Num, N::Int; tearing::Bool=true, determine_jacobian::Bool=false)
+    #TODO:Check if this is actually true
+
     # J0/J1 are built against the un-teared coefficient set, so keep tearing off when they
     # are requested or the Jacobian columns won't line up with unknowns(system).
     determine_jacobian && (tearing = false)
@@ -187,10 +189,6 @@ function HarmonicSystem(sys, ωvar::Num, N::Int; tearing::Bool=true, determine_j
     tvar = Num(ModelingToolkit.get_iv(sys))
     eqs, states = get_full_equations(sys, tvar)
 
-    # harmonic_equation's M==1 branch wraps `eqs = [eqs]`, expecting a scalar input.
-    # Unwrap here so we can pass Vectors uniformly from get_full_equations.
-    # `Num(states[1])` matches the prototype's input type, so `states[k]` indexing works inside.
-    eqs_arg    = length(states) == 1 ? eqs[1]         : eqs
     states_arg = length(states) == 1 ? Num(states[1]) : states
     if determine_jacobian
         print(eqs_arg)
