@@ -72,9 +72,9 @@ for i in 1:1:N
     #Julia linear algebra matrix solver M = A \ B
     resp = mat \ perturb
     u,v = resp[3], resp[2]
-
     signal_amp = abs((u + im*v) / 2)
     push!(out, signal_amp)
 end
 #plot our solution
 plot(Ω, abs.(out)) 
+
