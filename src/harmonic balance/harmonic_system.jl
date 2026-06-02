@@ -18,6 +18,7 @@ struct HarmonicResult
 end
 
 struct HarmonicProblem
+    harmonic_system::HarmonicSystem
     problem::NonlinearSolve.NonlinearProblem
     ω_sweep::Tuple{Num, Union{Float64,Vector{Float64}}}
     parameters::Dict
@@ -31,6 +32,7 @@ struct LinearisedProblem
     ω_sweep::Tuple{Num, Union{Float64,Vector{Float64}}}
     parameters::Dict
     parameter_sweep::Union{Dict{Num, Vector{Float64}},Nothing}
+    working_point::Dict{Num, Float64}
     ω_pump::Float64
     U_perturbation::Vector{Float64}
     result::HarmonicResult
@@ -76,15 +78,15 @@ function solve!(linear_problem::LinearisedProblem)
     if isnothing(linear_problem.parameter_sweep)
         println("Performing sweep $(ω) over $(length(ω_values)) points...")
         output_array = result.solution[ω]
-        numeric_substitution = merge(linear_problem.parameters, linear_problem.U₀, Dict(ω => linear_problem.ω_pump))
-        J₀ = substitute(linear_problem.jacobian[1], numeric_substitution)
-        J₁ = substitute(linear_problem.jacobian[2], numeric_substitution)
+        numeric_substitution = merge(linear_problem.parameters, linear_problem.working_point, Dict(ω => linear_problem.ω_pump))
+        J₀ = simplify(substitute(linear_problem.jacobian[1], numeric_substitution))
+        J₁ = simplify(substitute(linear_problem.jacobian[2], numeric_substitution))
 
         U_small_signal = (linear_problem.U_perturbation)
 
         for (column_index, Ω) in enumerate(ω_values)
             mat = J₀ - 1im * (Ω - linear_problem.ω_pump) * J₁
-            resp = mat \ perturb_c
+            resp = mat \ U_small_signal
             output_array[:, column_index] .= resp
         end
     else
@@ -166,19 +168,23 @@ function HarmonicProblem(harmonic_system::HarmonicSystem, ω_values::Union{Float
     system_parameters = merge(Dict(system_unknowns .=> U₀), parameters)
     nonlinear_prob = NonlinearProblem(system, system_parameters)
     if isnothing(linear_response)
-        return HarmonicProblem(nonlinear_prob, ω_sweep, parameters, parameter_sweep, U₀, output)
+        return HarmonicProblem(harmonic_system, nonlinear_prob, ω_sweep, parameters, parameter_sweep, U₀, output)
     else
         #TODO: Assert jacobian is generated for linear response
         pump_frequency, perturbation = linear_response
         working_prob = remake(nonlinear_prob; u0 = U₀, p = [harmonic_system.ω => pump_frequency])
         sol = ModelingToolkit.solve(working_prob, kwargs...)
-        working_point = sol.u
-        return LinearisedProblem(system.jacobian, ω_sweep, parameters, parameter_sweep, working_point, perturbation, output)
+        working_point = Dict(key => sol[key] for key in system_unknowns)
+        return LinearisedProblem(harmonic_system.jacobian, ω_sweep, parameters, parameter_sweep, working_point, pump_frequency, perturbation, output)
      end
 end
 
 
 function HarmonicSystem(sys, ωvar::Num, N::Int; tearing::Bool=true, determine_jacobian::Bool=false)
+    # J0/J1 are built against the un-teared coefficient set, so keep tearing off when they
+    # are requested or the Jacobian columns won't line up with unknowns(system).
+    determine_jacobian && (tearing = false)
+
     tvar = Num(ModelingToolkit.get_iv(sys))
     eqs, states = get_full_equations(sys, tvar)
 

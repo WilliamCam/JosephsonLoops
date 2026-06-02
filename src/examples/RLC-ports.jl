@@ -7,7 +7,8 @@ using BenchmarkTools
 
 const jls = JosephsonLoops
 loops = [
-    ["P1", "C1", "J1"]
+    ["P1", "C1"],
+    ["J1", "L1"]
 ]
 
 @time circuit = jls.process_netlist(loops)
@@ -19,7 +20,8 @@ ps = Dict(
     jls.C1.C => 100.0e-15,
     jls.J1.C => 1000.0e-15,
     jls.J1.I0 => 1e-6,
-    jls.J1.R => 1.0
+    jls.J1.R => 1.0,
+    jls.L1.L=>1000e-12
 )
 # Constants
 Ic = 1e-6 
@@ -40,13 +42,15 @@ sweep_params = copy(ps)
 sweep_params[jls.P1.Isrc.I] = 0.00565e-6 # Specific current for this test
 sweep_params[jls.J1.R] = 1e9  
 
-
+resp = zeros(12)
 # Build HarmonicSystem once (expensive symbolic expansion, shared across problems)
-@time h_sys = jls.HarmonicSystem(model, jls.P1.Isrc.ω, 1, determine_jacobian=false)
+@time h_sys = jls.HarmonicSystem(model, jls.P1.Isrc.ω, 1, determine_jacobian=true, tearing=false)
 h_sys
+
 # Sweep problem — sweep_var/sweep_vals live in HarmonicProblem
- h_prob = jls.HarmonicProblem(h_sys, ω_vec, sweep_params)
+ h_prob = jls.HarmonicProblem(h_sys, ω_vec, sweep_params, linear_response = (2*pi*4.75001*1e9, resp))
 # Solve
+h_prob.jacobian[2]
 sweep_res = jls.solve!(h_prob)
 
 current_p_mag = (jls.get_output(h_prob, sweep_res, "C1₊i",  1))

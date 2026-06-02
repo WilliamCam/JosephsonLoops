@@ -64,8 +64,10 @@ function get_derivatives(X, t)
 end
 
 function get_full_equations(model::ModelingToolkit.System, tvar::Num)
-    eqs = full_equations(model)
-    states = unknowns(model)
+    # copy: unknowns(model)/full_equations(model) return references into the model, and the
+    # deleteat! calls below would otherwise mutate it (corrupting it for the next call).
+    eqs = copy(full_equations(model))
+    states = copy(unknowns(model))
 
     diff2vars = Vector{Num}()
     diffvars = Vector{Num}()
