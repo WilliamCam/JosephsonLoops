@@ -8,12 +8,13 @@ struct HarmonicSystem
     time_domain_system::ModelingToolkit.System
     ω::Num
     N::Int
+    harmonic_ansatz::Any
     variable_map::Dict{Tuple{String, Int, Symbol}, Num}
     jacobian::Union{Tuple{Matrix{Num}, Matrix{Num}},Nothing}
 end
 
 struct HarmonicResult
-    solution::Dict{Num, Array{Float64}}
+    solution::Dict{Num, AbstractArray}
     #TODO: add retcodes
 end
 
@@ -45,8 +46,9 @@ function solve!(harmonic_problem::HarmonicProblem; continuation::Bool = true, kw
     if isnothing(harmonic_problem.parameter_sweep)
         println("Performing sweep $(ω) over $(length(ω_values)) points...")
         output_array = result.solution[ω]
+        print(typeof(output_array))
         working_prob = remake(nonlinear_prob; u0 = harmonic_problem.U₀, p = [ω => first(ω_values)])
-
+    
         _nl_solve_method!(output_array, working_prob, ω, ω_values, continuation=continuation)
     else
         for param_sweep in harmonic_problem.parameter_sweep
@@ -84,7 +86,7 @@ function solve!(linear_problem::LinearisedProblem)
         U_small_signal = (linear_problem.U_perturbation)
 
         for (column_index, Ω) in enumerate(ω_values)
-            mat = J₀ - 1im * (Ω - linear_problem.ω_pump) * J₁
+            mat = simplify(J₀ - 1im * (Ω - linear_problem.ω_pump) * J₁)
             resp = mat \ U_small_signal
             output_array[:, column_index] .= resp
         end
@@ -146,7 +148,7 @@ function HarmonicProblem(harmonic_system::HarmonicSystem, ω_values::Union{Float
     ωvar = harmonic_system.ω
     ω_sweep = (ωvar, ω_values)
     system_unknowns = unknowns(system)
-    _Nvars = length(system_unknowns)
+    _Nvars = isnothing(linear_response) ? length(system_unknowns) : size(harmonic_system.jacobian[1], 1)
 
     #Preallocate results object
     if isnothing(parameter_sweep)
@@ -160,7 +162,7 @@ function HarmonicProblem(harmonic_system::HarmonicSystem, ω_values::Union{Float
 
     #Determine inital condition state vector
      if isnothing(U₀)  
-        U₀ = fill(0.0, length(unknowns(harmonic_system.system)))
+        U₀ = fill(0.0, length(unknowns(system)))
      end
 
     #Initialise NonlinearProblem
@@ -173,7 +175,16 @@ function HarmonicProblem(harmonic_system::HarmonicSystem, ω_values::Union{Float
         pump_frequency, perturbation = linear_response
         working_prob = remake(nonlinear_prob; u0 = U₀, p = [harmonic_system.ω => pump_frequency])
         sol = ModelingToolkit.solve(working_prob, kwargs...)
-        working_point = Dict(key => sol[key] for key in system_unknowns)
+        working_point = Dict(
+            key => begin
+                try
+                    sol[key]
+                catch e
+                    0.0
+                end
+            end 
+            for key in values(harmonic_system.variable_map)
+        )
         return LinearisedProblem(harmonic_system.jacobian, ω_sweep, parameters, parameter_sweep, working_point, pump_frequency, perturbation, output)
      end
 end
@@ -188,10 +199,9 @@ function HarmonicSystem(sys, ωvar::Num, N::Int; tearing::Bool=true, determine_j
     eqs_arg    = length(states) == 1 ? eqs[1]         : eqs
     states_arg = length(states) == 1 ? Num(states[1]) : states
     if determine_jacobian
-        print(eqs_arg)
-        nonlinear_sys, _, variable_map, jac = harmonic_equation(eqs_arg, states_arg, tvar, ωvar, N; jac=true)
+        nonlinear_sys, X, variable_map, jac = harmonic_equation(eqs_arg, states_arg, tvar, ωvar, N; jac=true)
     else
-        nonlinear_sys, _, variable_map = harmonic_equation(eqs_arg, states_arg, tvar, ωvar, N)
+        nonlinear_sys, X, variable_map = harmonic_equation(eqs_arg, states_arg, tvar, ωvar, N)
         jac = nothing
     end
     
@@ -209,5 +219,5 @@ function HarmonicSystem(sys, ωvar::Num, N::Int; tearing::Bool=true, determine_j
     @named nonlinear_sys = NonlinearSystem(sys_eqs_built, sys_vars, parameters(sys))
     complete_sys = tearing ? mtkcompile(nonlinear_sys) : complete(nonlinear_sys)
 
-    return HarmonicSystem(complete_sys, sys, ωvar, N, variable_map, jac)
+    return HarmonicSystem(complete_sys, sys, ωvar, N, X, variable_map, jac)
 end

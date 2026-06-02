@@ -155,6 +155,7 @@ function rotate_to_harmonic_frame(M, N, Nt, harmonic_system)
         col_range = (d-1)*Nt + 1 : d*Nt
         Γ_total[row_range, col_range] .= Γ_single
     end
+    #ordering should be preserved as equations in colocation.jl are created in this order
     rotated_system = Γ_total * [equation.lhs for equation in harmonic_system]  
     return (rotated_system)
 end

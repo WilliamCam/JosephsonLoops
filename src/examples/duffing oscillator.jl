@@ -32,18 +32,26 @@ B1   = h_sys.variable_map[("x", 1, :Sin)]
 
 # Solve HB system for frequencies (large-signal pump)
 N = 200
-ω_vec = range(0.8, 1.2, N)
-ps = Dict(α => 1.0, ω0 => 1.0, F => 0.01, η => 1.0e-1, γ => 1.0e-3)
-h_prob = jls.HarmonicProblem(h_sys, ps; sweep_var=ω, sweep_vals=ω_vec)
-h_result = jls.solve(h_prob)
+ω_vec = collect(range(0.8, 1.2, N))
+j = 60
+ωp = ω_vec[j]
+ps = Dict(α => 1.0, ω0 => 1.0, F => 0.01, η => 1.0e-1, γ => 1.0e-3, ω=>ωp)
+resp = zeros(3)
+resp[2] = 1e-3
+resp[3] = 1e-3
+h_prob = jls.HarmonicProblem(h_sys, ω_vec, ps, linear_response = (ωp, resp))
+h_result = jls.solve!(h_prob)
+
+h_prob.result.solution[ω][3,:]
+
+using Plots
+plot(abs.(h_prob.result.solution[ω][2,:] + 1im*h_prob.result.solution[ω][3,:]))
 
 # Pump amplitude vs ω (DC + fundamental magnitude, matches prototype)
 solution = h_result.results[A_dc] .+ sqrt.(h_result.results[A1].^2 .+ h_result.results[B1].^2)
 plot(ω_vec, solution)
 
 # Linearize around a single pump tone at j-th sweep point (warm-start lands on high branch)
-j = 70
-ωp = ω_vec[j]
 
 # Working point: every harmonic coefficient evaluated at ωp
 U₀ = Dict{Num, Float64}(v => vals[j] for (v, vals) in h_result.results)

@@ -1,4 +1,4 @@
-﻿#In this example we model an parallel RLC circuit driven by a voltage source
+﻿#In this example we model an nonlinear parallel RLC circuit driven by a voltage source
 
 #Load JosephsonLoops package
 using JosephsonLoops 
@@ -6,11 +6,10 @@ const jls = JosephsonLoops
 
 loops = [
 ["I1", "R1"],
-["R1", "C1"],
- ["L1","J1"]
+["R1", "C1", "J1"]
 ]
 
-ext_flux = [false, false, false]
+ext_flux = [false, true]
 
 
 circuit = jls.process_netlist(loops, ext_flux=ext_flux)
