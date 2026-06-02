@@ -153,11 +153,11 @@ function HarmonicProblem(harmonic_system::HarmonicSystem, ω_values::Union{Float
 
     #Preallocate results object
     if isnothing(parameter_sweep)
-        result_dict = Dict{Num, Array{Float64}}(ωvar => Array{Float64}(undef, _Nvars, length(ω_values)))
+        result_dict = Dict{Num, Array{ComplexF64}}(ωvar => Array{ComplexF64}(undef, _Nvars, length(ω_values)))
     else
         keys_list = collect(keys(parameter_sweep))
         _get_result_size(parameter::Num) = (_Nvars, length(parameter_sweep[parameter]), length(ω_values)) 
-        result_dict = Dict{Num, Array{Float64}}(key => Array{Float64}(undef, _get_result_size(key)...) for key in keys_list)
+        result_dict = Dict{Num, Array{ComplexF64}}(key => Array{ComplexF64}(undef, _get_result_size(key)...) for key in keys_list)
     end
     output = HarmonicResult(result_dict)
 
@@ -200,6 +200,7 @@ function HarmonicSystem(sys, ωvar::Num, N::Int; tearing::Bool=true, determine_j
     tvar = Num(ModelingToolkit.get_iv(sys))
     eqs, states = get_full_equations(sys, tvar)
 
+    eqs_arg    = length(states) == 1 ? eqs[1]         : eqs
     states_arg = length(states) == 1 ? Num(states[1]) : states
     if determine_jacobian
         nonlinear_sys, X, variable_map, jac = harmonic_equation(eqs_arg, states_arg, tvar, ωvar, N; jac=true)

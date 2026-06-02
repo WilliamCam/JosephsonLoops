@@ -45,6 +45,8 @@ function apply_harmonic_expression(h_prob::HarmonicProblem, result::HarmonicResu
     isnothing(h_prob.parameter_sweep) || error("get_output supports ω-only sweeps")
     ω, ω_values = h_prob.ω_sweep
     ω_vec = ω_values isa Number ? [Float64(ω_values)] : ω_values
+
+    #TODO: functionality for parameter sweeps
     solution = result.solution[ω]
 
     # Substitutions that reduce the phasor to the system unknowns and ω:

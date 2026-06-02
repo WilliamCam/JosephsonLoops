@@ -24,8 +24,6 @@ duffing_model = mtkcompile(duffing_sys)
 # Build the harmonic system with linearization data populated (J0, J1)
 h_sys = jls.HarmonicSystem(duffing_model, ω, Nharmonics; determine_jacobian=true)
 
-
-
 # Large-signal pump: sweep ω and solve the harmonic balance system. The same h_sys feeds
 # the linear response below; determine_jacobian=true (above) is what builds its Jacobians.
 ω_vec = collect(range(0.8, 1.2, 200))
@@ -53,11 +51,11 @@ perturbation[3] = 1.0e-3
 U₀ = sweep_res.solution[ω][:, j]
 Ω = collect(range(0.8, 1.2, 800))
 lin_prob = jls.HarmonicProblem(h_sys, Ω, ps; linear_response=(ωp, perturbation), U₀=U₀)
-lin = jls.solve!(lin_prob)
+jls.solve!(lin_prob)
 
 # Response is stored as real/imag slices: solution[ω][coeff, Ω, (1=real, 2=imag)].
-sol    = lin.solution[ω]
-u_resp = complex.(sol[3, :, 1], sol[3, :, 2])   # sin@1 response
-v_resp = complex.(sol[2, :, 1], sol[2, :, 2])   # cos@1 response
+sol   = lin_prob.result.solution[ω]
+u_resp = sol[3, :]  # sin@1 response
+v_resp = sol[2, :]  # cos@1 response
 out = abs.((u_resp .+ 1im .* v_resp) ./ 2)
 plot(Ω, out)
