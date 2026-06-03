@@ -7,8 +7,7 @@ using BenchmarkTools
 
 const jls = JosephsonLoops
 loops = [
-    ["P1", "C1"],
-    ["J1", "L1"]
+    ["P1", "C1", "J1"]
 ]
 
 @time circuit = jls.process_netlist(loops)
@@ -20,8 +19,7 @@ ps = Dict(
     jls.C1.C => 100.0e-15,
     jls.J1.C => 1000.0e-15,
     jls.J1.I0 => jls.Φ₀/(2*pi*1.0e-9),
-    jls.J1.R => 50.0,
-    jls.L1.L=>1000e-12
+    jls.J1.R => 50.0
 )
 
 #time domain simulation 
@@ -31,27 +29,23 @@ p1 = jls.plot(tsol[jls.C1.i][end-400:end], title = "Transient Time Plot", xlabel
 
 #hb Setup
 # Define the sweep range (8 to 10.0 GHz)
-ω_vec = collect(2*pi*(1:0.01:10.0)*1e9)
+ω_vec = collect(2*pi*(1:0.1:30.0)*1e9)
 
 
 sweep_params = delete!(ps, jls.P1.Isrc.ω)
 
-sys = jls.HarmonicSystem(model, jls.P1.Isrc.ω, 1, determine_jacobian=true)
+sys = jls.HarmonicSystem(model, jls.P1.Isrc.ω, 1)
 prob = jls.HarmonicProblem(sys, ω_vec, sweep_params)
 
 result = jls.solve!(prob)
 out = prob.result.solution[jls.P1.Isrc.ω]
 
-vcos = jls.Φ₀/2π * abs.(out[3,:]).^2
-using Plots
-plot(ω_vec./2π, vcos)
+current = jls.get_output(prob, result, "C1₊i", 1)
+theta_p_mag = jls.get_output(prob, result, "P1₊dθ",  1)
 
 
-current_p_mag = (jls.get_output(h_prob, sweep_res, "C1₊i",  1))
-theta_p_mag   = (jls.get_output(h_prob, sweep_res, "P1₊dθ",  1))
-
-Ii = @. (0.00565e-6 - current_p_mag)
-Vi = @. (jls.Φ₀ / (2*pi) * theta_p_mag) 
+Ii = @. (0.00565e-6 - current)
+Vi = @. (jls.Φ₀ / (2*pi) * real.(theta_p_mag)) 
 # Calculate Power Waves (a = incident, b = reflected)
 Z0 = 50.0
 ai = @. 0.5 * (Vi + Z0 * Ii) / sqrt(Z0)

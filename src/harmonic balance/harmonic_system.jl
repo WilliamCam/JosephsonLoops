@@ -118,7 +118,7 @@ function solve!(linear_problem::LinearisedProblem)
     end
 end
 
-function _nl_solve_method!(prealloc_array::Array{Float64}, problem::NonlinearSolve.NonlinearProblem, ω_variable::Num, ω_sweep_values::Union{Float64, Vector{Float64}}; 
+function _nl_solve_method!(prealloc_array::Array{ComplexF64}, problem::NonlinearSolve.NonlinearProblem, ω_variable::Num, ω_sweep_values::Union{Float64, Vector{Float64}}; 
     continuation::Bool=true, parameter_index::Int = 0, kwargs...
         )
     for (column_index, frequency) in enumerate(ω_sweep_values)
@@ -162,9 +162,9 @@ function HarmonicProblem(harmonic_system::HarmonicSystem, ω_values::Union{Float
     output = HarmonicResult(result_dict)
 
     #Determine inital condition state vector
-     if isnothing(U₀)  
+    if isnothing(U₀)  
         U₀ = fill(0.0, length(unknowns(system)))
-     end
+    end
 
     #Initialise NonlinearProblem
     system_parameters = merge(Dict(system_unknowns .=> U₀), parameters)

@@ -25,6 +25,7 @@ end
 # coefficients live in the variable_map; anything else (an observed quantity such as a
 # branch current) is rebuilt from the observed equations.
 function get_harmonic_expression(h_prob::HarmonicProblem, var_name::String, order::Int)
+    #TODO: User will have acess to harmonic system from global scope, so can remove harmonic_system field from harmonic_problem
     variable_map = h_prob.harmonic_system.variable_map
     if order == 0
         phasor_re = get(variable_map, (var_name, 0, :Cos), nothing)
@@ -66,7 +67,7 @@ function apply_harmonic_expression(h_prob::HarmonicProblem, result::HarmonicResu
 
     return map(axes(solution, 2)) do i
         input_vec = [solution[:, i]; ω_vec[i]]
-        complex(f_re(input_vec), f_im(input_vec))
+        complex(f_re(real.(input_vec)), f_im(imag.(input_vec)))
     end
 end
 
