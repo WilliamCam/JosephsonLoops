@@ -18,8 +18,8 @@ ps = Dict(
     jls.P1.Rsrc.R => 50.0,
     jls.C1.C => 100.0e-15,
     jls.J1.C => 1000.0e-15,
-    jls.J1.I0 => jls.Φ₀/(2*pi*1.0e-9),
-    jls.J1.R => 50.0
+    jls.J1.I0 => 1e-6,
+    jls.J1.R => 10e3
 )
 
 #time domain simulation 
@@ -29,7 +29,7 @@ p1 = jls.plot(tsol[jls.C1.i][end-400:end], title = "Transient Time Plot", xlabel
 
 #hb Setup
 # Define the sweep range (8 to 10.0 GHz)
-ω_vec = collect(2*pi*(1:0.1:30.0)*1e9)
+ω_vec = collect(2*pi*(7:0.01:10.0)*1e9)
 
 
 sweep_params = delete!(ps, jls.P1.Isrc.ω)
