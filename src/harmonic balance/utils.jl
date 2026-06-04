@@ -129,8 +129,7 @@ function build_jacobians(rotated_system, vars, dvars)
     _jac = Symbolics.jacobian(rotated_system, vars)
     jac_0 = Num.((substitute(_jac, Dict(dvars .=> 0))))
     jac_1 = Symbolics.jacobian(rotated_system, dvars)
-    return [rotated_system, vars, _jac]
-    #return jac_0, jac_1
+    return jac_0, jac_1
 end
 
 function rotate_to_harmonic_frame(M, N, Nt, harmonic_system)

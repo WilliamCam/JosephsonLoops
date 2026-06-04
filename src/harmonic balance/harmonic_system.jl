@@ -205,7 +205,6 @@ function HarmonicSystem(sys, ωvar::Num, N::Int; tearing::Bool=true, determine_j
     states_arg = length(states) == 1 ? Num(states[1]) : states
     if determine_jacobian
         nonlinear_sys, X, variable_map, jac = harmonic_equation(eqs_arg, states_arg, tvar, ωvar, N; jac=true)
-        return jac
     else
         nonlinear_sys, X, variable_map = harmonic_equation(eqs_arg, states_arg, tvar, ωvar, N)
         jac = nothing

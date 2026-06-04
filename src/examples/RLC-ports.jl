@@ -54,24 +54,23 @@ p = jls.plot(ω_vec/(2*pi), 20*log10.(abs.(bi./ai)), xlabel="Frequency (Hz)", yl
 #Performing Linear analysis on system to find small signal gain
 sys = jls.HarmonicSystem(model, jls.P1.Isrc.ω, 2, determine_jacobian=true)
 resp = zeros(size(sys.jacobian[1],1))
-resp[12] = 1e-9
-resp[13] = 1e-9
-
+resp[12] = 1.0e-9
+resp[13] = 1.0e-9
 lin_prob = jls.HarmonicProblem(sys, ω_vec, sweep_params, linear_response = (2*pi*4.76*1e9, resp))
 # Solve
 sweep_res = jls.solve!(lin_prob)
 out = lin_prob.result.solution[jls.P1.Isrc.ω]
 using Plots
-current = sqrt.(out[12,:].^2 + out[13,:].^2)
+current = sqrt.(out[12,:].^2 + out[13,:].^2)/jls.Φ₀
 voltage = sqrt.(out[17,:].^2 + out[18,:].^2)
 plot((abs.(voltage)))
 
 Ii = -sqrt(1e-9^2+1e-9^2)
-Vi = @. jls.Φ₀ / (2*pi) * (voltage)
-
+Vi = (2*pi) * (voltage)
+Z0=50
 ai = @. 0.5 * (Vi + Z0 * Ii) / sqrt(Z0)
 bi = @. 0.5 * (Vi - Z0 * Ii) / sqrt(Z0)
-p = jls.plot(ω_vec/(2*pi), (abs.(bi./ai)), xlabel="Frequency (Hz)", ylabel="S11 (dB)", title="RLC S-Parameter", lw=2)
+p = jls.plot(ω_vec/(2*pi), 20*log10.(abs.(bi./ai)), xlabel="Frequency (Hz)", ylabel="S11 (dB)", title="RLC S-Parameter", lw=2)
 
 
 #  JPA linearization (matches MIT JosephsonCircuits.jl JPA example)
