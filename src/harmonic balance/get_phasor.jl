@@ -1,267 +1,138 @@
-# Extracts numeric phasor A - im B from Harmonic balance result for some order in ω
+# Extracts the numeric phasor Aₙ + iBₙ from a harmonic-balance result for some order in ω.
 using ModelingToolkit
-#  Shared Helpers
 
-function get_phasor(h_prob::HarmonicProblem, result::HarmonicResult, var_name::String, order::Int = 1)
-    #TODO: parameterised or updated call to harmonic_expression to avoid recomputing output expression
-    expr = get_harmonic_expression(h_prob, var_name, order)
-    return apply_harmonic_expression(h_prob, expr[1], expr[2])(result)
+# Drop the `(t)` time argument from a symbol's printed name, e.g. "C1₊i(t)" -> "C1₊i".
+strip_t(x) = replace(string(x), "(t)" => "")
+
+# Repeatedly substitute `subs` into `expr` until it stops changing. Observed equations can
+# reference other observed equations, so a single pass may not fully flatten the result.
+# `transform` is applied after each substitution (e.g. expand_derivatives).
+function substitute_to_fixpoint(expr, subs; max_iters = 20, transform = identity)
+    for _ in 1:max_iters
+        next = transform(Symbolics.substitute(expr, subs))
+        isequal(next, expr) && break
+        expr = next
+    end
+    return expr
 end
 
-"""Strip `(t)` suffix and whitespace from a symbolic variable name."""
-clean_name(x) = replace(string(x), "(t)" => "", " " => "")
-
-"""Find a matching key in a variable_map by exact or fuzzy name match."""
-function find_varmap_key(variable_map, vname, order, component)
-    haskey(variable_map, (vname, order, component)) && return (vname, order, component)
-    for k in keys(variable_map)
-        k[2] == order && k[3] == component && occursin(vname, k[1]) && return k
-    end
-    return nothing
+function get_output(h_prob::HarmonicProblem, result::HarmonicResult, var_name::String, order::Int = 1)
+    expression = get_harmonic_expression(h_prob, var_name, order)
+    return apply_harmonic_expression(h_prob, result, expression)
 end
 
-"""Unified symbolic lookup across one or more Dicts. Tries hash, isequal, then string match."""
-function _find_sym(sym::Num, dicts...)
-    sym_uw = Symbolics.unwrap(sym)
-    sym_str = clean_name(sym)
-    for d in dicts
-        haskey(d, sym) && return d[sym]
-        for (k, v) in d
-            (isequal(k, sym) || isequal(Symbolics.unwrap(k), sym_uw)) && return v
-        end
-        for (k, v) in d
-            clean_name(k) == sym_str && return v
-        end
-    end
-    return nothing
-end
-
-function _get_coeff_expr(sym::Num, h_prob::HarmonicProblem)
-    sys = h_prob.harmonic_system.complete_sys
-    # If sym is a system unknown, return it directly — it will be substituted numerically
-    for u in unknowns(sys)
-        isequal(u, sym) && return sym
-    end
-    # isequal can fail for array-indexed vars (different underlying array objects after
-    # mtkcompile).  Retry with string comparison, returning the COMPILED system's symbol
-    # so that build_function can map it to the correct input position.
-    sym_str = clean_name(sym)
-    for u in unknowns(sys)
-        clean_name(u) == sym_str && return Num(Symbolics.unwrap(u))
-    end
-    # sym was eliminated by tearing — find it in observed equations
-    for eq in observed(sys)
-        isequal(eq.lhs, sym) && return Num(Symbolics.unwrap(eq.rhs))
-    end
-    for eq in observed(sys)
-        clean_name(eq.lhs) == sym_str && return Num(Symbolics.unwrap(eq.rhs))
-    end
-    # Not found anywhere — return the symbol itself (may be zero-forced by structure)
-    @warn "_get_coeff_expr: could not resolve $(clean_name(sym)) — returning as-is. unknowns=$(clean_name.(unknowns(sys))), observed_lhs=$(clean_name.(eq.lhs for eq in observed(sys)))"
-    return sym
-end
-
+# Symbolic (cos, sin) Fourier coefficients of `var_name` at the requested order. A state's
+# coefficients live in the variable_map; anything else (an observed quantity such as a
+# branch current) is rebuilt from the observed equations.
 function get_harmonic_expression(h_prob::HarmonicProblem, var_name::String, order::Int)
-    var_clean = clean_name(var_name)
-    vmap = h_prob.harmonic_system.variable_map
-    #Build symbolic phasor expression using raw vmap symbols 
+    #TODO: User will have acess to harmonic system from global scope, so can remove harmonic_system field from harmonic_problem
+    variable_map = h_prob.harmonic_system.variable_map
     if order == 0
-        key = find_varmap_key(vmap, var_clean, 0, :Cos)
-        phasor_re = key !== nothing ? vmap[key] : reconstruct_from_observed(h_prob, var_clean, 0, :Cos)
-        phasor_im = Num(0.0)
-    else
-        key_cos = find_varmap_key(vmap, var_clean, order, :Cos)
-        key_sin = find_varmap_key(vmap, var_clean, order, :Sin)
-        if key_cos !== nothing && key_sin !== nothing
-            A_expr = vmap[key_cos]
-            B_expr = vmap[key_sin]
-        else
-            A_expr = reconstruct_from_observed(h_prob, var_clean, order, :Cos)
-            B_expr = reconstruct_from_observed(h_prob, var_clean, order, :Sin)
-        end
-        phasor_re = A_expr
-        phasor_im = B_expr
+        phasor_re = get(variable_map, (var_name, 0, :Cos), nothing)
+        phasor_re === nothing && (phasor_re = reconstruct_from_observed(h_prob, var_name, 0, :Cos))
+        return phasor_re, Num(0.0)
     end
+    phasor_re = get(variable_map, (var_name, order, :Cos), nothing)
+    phasor_im = get(variable_map, (var_name, order, :Sin), nothing)
+    phasor_re === nothing && (phasor_re = reconstruct_from_observed(h_prob, var_name, order, :Cos))
+    phasor_im === nothing && (phasor_im = reconstruct_from_observed(h_prob, var_name, order, :Sin))
     return phasor_re, phasor_im
 end
 
-function apply_harmonic_expression(h_prob::HarmonicProblem, expression_re::Num, expression_im::Num)
-    vmap = h_prob.harmonic_system.variable_map
-    sys = h_prob.harmonic_system.complete_sys
-    all_vmap_syms = collect(values(vmap))
-    _params     = collect(parameters(sys))
-    all_vars_uw   = vcat(Symbolics.unwrap.(all_vmap_syms), Symbolics.unwrap.(_params))
+# Compile the symbolic phasor and evaluate it at every ω point. The expression is reduced
+# to the system unknowns and ω, then mapped over the solved `[unknown × ω point]` array.
+function apply_harmonic_expression(h_prob::HarmonicProblem, result::HarmonicResult, expression::Tuple{Num,Num})
+    system = h_prob.harmonic_system.system
+    isnothing(h_prob.parameter_sweep) || error("get_output supports ω-only sweeps")
+    ω, ω_values = h_prob.ω_sweep
+    ω_vec = ω_values isa Number ? [Float64(ω_values)] : ω_values
 
-    #Compile build_function 
-    f_re = Symbolics.build_function(Symbolics.unwrap(expression_re), all_vars_uw; expression=Val{false})
-    f_im = Symbolics.build_function(Symbolics.unwrap(expression_im), all_vars_uw; expression=Val{false})
+    #TODO: functionality for parameter sweeps
+    solution = result.solution[ω]
 
-    # Return closure for fast numeric evaluation ─
-    n_vmap   = length(all_vmap_syms)
-    n_params = length(_params)
+    # Substitutions that reduce the phasor to the system unknowns and ω:
+    #   observed_subs — observed equations, skipping whole-array reconstructions
+    #     (mtkcompile's `E => change_origin(...)`) that would become uncompilable; and
+    #   fixed_params  — every parameter value in h_prob.parameters except the swept ω.
+    observed_subs = Dict(eq.lhs => eq.rhs for eq in observed(system)
+                         if !(Symbolics.symtype(Symbolics.unwrap(eq.lhs)) <: AbstractArray))
+    fixed_params = Dict(Num(p) => Float64(h_prob.parameters[Num(p)]) for p in parameters(system)
+                        if !isequal(Num(p), ω) && haskey(h_prob.parameters, Num(p)))
 
-    # Pre-compute fixed parameter values
-    param_vals = zeros(Float64, n_params)
-    for (j, p) in enumerate(_params)
-        val = _find_sym(Num(p), h_prob.params)
-        val !== nothing && (param_vals[j] = Float64(val))
-    end
+    inputs = vcat(Symbolics.unwrap.(unknowns(system)), Symbolics.unwrap(ω))
+    compile(expr) = Symbolics.build_function(
+        Symbolics.unwrap(Symbolics.substitute(substitute_to_fixpoint(expr, observed_subs), fixed_params)),
+        inputs; expression = Val{false})
+    f_re, f_im = compile.(expression)
 
-    return function(sweep_res::HarmonicResult)
-        n_points = length(sweep_res.sweep_vals)
-        input_vec = zeros(Float64, n_vmap + n_params)
-        input_vec[n_vmap+1:end] .= param_vals
-        vmap_vecs = Vector{Union{Nothing, Vector{Float64}}}(undef, n_vmap)
-        for (j, sym) in enumerate(all_vmap_syms)
-            vmap_vecs[j] = _find_sym(sym, sweep_res.results)
-        end
-        # Locate sweep parameter index in param section
-        sweep_j = nothing
-        sweep_str = clean_name(sweep_res.sweep_var)
-        for (j, p) in enumerate(_params)
-            if clean_name(p) == sweep_str
-                sweep_j = j; break
-            end
-        end
-        phasor = Vector{ComplexF64}(undef, n_points)
-        for i in 1:n_points
-            for j in 1:n_vmap
-                input_vec[j] = vmap_vecs[j] !== nothing ? vmap_vecs[j][i] : 0.0
-            end
-            sweep_j !== nothing && (input_vec[n_vmap + sweep_j] = sweep_res.sweep_vals[i])
-            phasor[i] = complex(f_re(input_vec), f_im(input_vec))
-        end
-        return phasor
+    return map(axes(solution, 2)) do i
+        input_vec = [solution[:, i]; ω_vec[i]]
+        complex(f_re(real.(input_vec)), f_im(imag.(input_vec)))
     end
 end
 
+# Rebuild the harmonic coefficient of an observed (non-state) variable: flatten its
+# defining equation down to the original states, substitute each state's harmonic ansatz,
+# then read off the requested cos/sin coefficient.
 function reconstruct_from_observed(h_prob::HarmonicProblem, var_name::String, order::Int, component::Symbol)
-    sys = h_prob.harmonic_system.complete_sys
-    t_sym = h_prob.harmonic_system.t_var
-    tvar_uw = Symbolics.unwrap(t_sym)
+    hs = h_prob.harmonic_system
+    t  = ModelingToolkit.get_iv(hs.time_domain_system)
 
-    obs_dict = Dict{Any, Any}()
-    for (k, v) in h_prob.harmonic_system.observed_equations
-        obs_dict[Symbolics.unwrap(k)] = Symbolics.unwrap(v)
-    end
-    for eq in observed(sys)
-        obs_dict[Symbolics.unwrap(eq.lhs)] = Symbolics.unwrap(eq.rhs)
-    end
-    # Find target variable
-    var_name_clean = clean_name(var_name)
-    target_sym = nothing
-    for k in keys(obs_dict)
-        k_str = clean_name(k)
-        if k_str == var_name_clean || occursin(var_name_clean, k_str)
-            target_sym = k
+    # Every observed equation (time-domain and harmonic), keyed by its unwrapped lhs. The
+    # harmonic system is listed last so its definitions win on any shared key.
+    observed_map = Dict{Any, Any}(Symbolics.unwrap(eq.lhs) => Symbolics.unwrap(eq.rhs)
+                                  for sys in (hs.time_domain_system, hs.system) for eq in observed(sys))
+
+    # Locate the observable's defining equation by exact (t-stripped) name.
+    target = nothing
+    for key in keys(observed_map)
+        if strip_t(key) == var_name
+            target = key
             break
         end
     end
-    target_sym === nothing && error("Variable $var_name not found in observed equations. Available: $([clean_name(k) for k in keys(obs_dict)])")
+    target === nothing && error("Variable $var_name not found in observed equations")
 
-    # Start with the RHS of the observed equation
-    expr = obs_dict[target_sym]
-    states_set = Set(Symbolics.unwrap(v) for v in unknowns(sys))
-    params_set = Set(Symbolics.unwrap(p) for p in parameters(sys))
+    # Flatten observed-in-observed down to states/params. Skip whole-array reconstructions.
+    flat_subs = Dict(k => v for (k, v) in observed_map if !(Symbolics.symtype(k) <: AbstractArray))
+    expr = substitute_to_fixpoint(observed_map[target], flat_subs; transform = Symbolics.expand_derivatives)
 
-    # Flatten observed-in-observed dependencies
-    for _ in 1:20
-        vars_in_expr = Symbolics.get_variables(expr)
-        unknown_vars = filter(v -> !in(v, states_set) && !in(v, params_set) && !isequal(v, tvar_uw), vars_in_expr)
-        isempty(unknown_vars) && break
-        subs = Dict()
-        for u in unknown_vars
-            if SymbolicUtils.iscall(u) && SymbolicUtils.operation(u) isa Differential
-                base_var = SymbolicUtils.arguments(u)[1]
-                haskey(obs_dict, base_var) && (subs[u] = Symbolics.expand_derivatives(Differential(tvar_uw)(obs_dict[base_var])))
-            elseif haskey(obs_dict, u)
-                subs[u] = obs_dict[u]
-            end
-        end
-        isempty(subs) && break
-        expr = Symbolics.substitute(expr, subs)
-        expr = Symbolics.expand_derivatives(expr)
-    end
-
-    # Identify original ODE state variables still present in expr
-    orig_state_names = Set(k[1] for k in keys(h_prob.harmonic_system.variable_map))
-    orig_state_map = Dict{Any, Tuple{String, Int}}()
-    for v in Symbolics.get_variables(expr)
-        in(v, states_set) && continue
-        in(v, params_set) && continue
-        isequal(v, tvar_uw) && continue
-        v_str = clean_name(v)
-        found = false
-        for name in orig_state_names
-            if v_str == name
-                orig_state_map[v] = (name, 0); found = true; break
-            elseif v_str == name * "ˍt" || endswith(v_str, "₊" * name * "ˍt")
-                orig_state_map[v] = (name, 1); found = true; break
-            elseif v_str == name * "ˍtt" || endswith(v_str, "₊" * name * "ˍtt")
-                orig_state_map[v] = (name, 2); found = true; break
-            end
-            if !found && SymbolicUtils.iscall(v) && SymbolicUtils.operation(v) isa Differential
-                base = SymbolicUtils.arguments(v)[1]
-                if clean_name(base) == name
-                    orig_state_map[v] = (name, 1); break
-                end
-            end
-        end
-    end
-
-    vmap = h_prob.harmonic_system.variable_map
-    ωvar_sym = h_prob.harmonic_system.ω_var
-    N = h_prob.harmonic_system.N
-
-    # Build symbolic ansatz substitution 
-    # Use _get_coeff_expr to pre-resolve any vmap symbols that were eliminatedby mtkcompile 
+    # Substitute each original state by its harmonic ansatz (and derivatives). MTK lowers
+    # D(state) either to a renamed `stateˍt(t)` symbol or a Differential wrapper.
     ansatz_subs = Dict{Any, Any}()
-    for (orig_var, (orig_name, deriv_order)) in orig_state_map
-        x_t = dx_t = ddx_t = Num(0.0)
-
-        key_dc = find_varmap_key(vmap, orig_name, 0, :Cos)
-        key_dc !== nothing && (x_t += _get_coeff_expr(vmap[key_dc], h_prob))
-
-        for n in 1:N
-            key_c = find_varmap_key(vmap, orig_name, n, :Cos)
-            key_s = find_varmap_key(vmap, orig_name, n, :Sin)
-            An = key_c !== nothing ? _get_coeff_expr(vmap[key_c], h_prob) : Num(0.0)
-            Bn = key_s !== nothing ? _get_coeff_expr(vmap[key_s], h_prob) : Num(0.0)
-            nω = n * ωvar_sym
-            x_t   +=  An * cos(nω * t_sym) + Bn * sin(nω * t_sym)
-            dx_t  += -An * nω * sin(nω * t_sym) + Bn * nω * cos(nω * t_sym)
-            ddx_t += -An * nω^2 * cos(nω * t_sym) - Bn * nω^2 * sin(nω * t_sym)
-        end
-
-        ansatz_subs[orig_var] = Symbolics.unwrap(
-            deriv_order == 0 ? x_t : deriv_order == 1 ? dx_t : ddx_t)
-    end
-
-    # Substitute symbolic ansatz into expression
-    val_t = Symbolics.substitute(expr, ansatz_subs)
-    val_t = Symbolics.expand_derivatives(val_t)
-
-    #  Isolate the target harmonic component 
-    remaining = Symbolics.get_variables(val_t)
-    if any(isequal(v, tvar_uw) for v in remaining)
-        val_expanded = Symbolics.expand(val_t)
-        isolate = Dict{Any, Any}()
-        for k in 1:(2*N+1)
-            cos_k = Symbolics.unwrap(cos(Num(k) * ωvar_sym * t_sym))
-            sin_k = Symbolics.unwrap(sin(Num(k) * ωvar_sym * t_sym))
-            if k == order
-                isolate[cos_k] = (component == :Cos ? 1.0 : 0.0)
-                isolate[sin_k] = (component == :Sin ? 1.0 : 0.0)
-            else
-                isolate[cos_k] = 0.0
-                isolate[sin_k] = 0.0
+    for state_name in unique(key[1] for key in keys(hs.variable_map))
+        A_coeffs = [hs.variable_map[(state_name, n, :Cos)] for n in 0:hs.N]
+        B_coeffs = [hs.variable_map[(state_name, n, :Sin)] for n in 1:hs.N]
+        X = harmonic_solution(hs.N, t, hs.ω, A_coeffs, B_coeffs)
+        dX, d2X = get_derivatives(X, t)
+        for v in Symbolics.get_variables(expr)
+            name = strip_t(v)
+            if name == state_name
+                ansatz_subs[v] = Symbolics.unwrap(X)
+            elseif name == state_name * "ˍt" || endswith(name, "₊" * state_name * "ˍt")
+                ansatz_subs[v] = Symbolics.unwrap(dX)
+            elseif name == state_name * "ˍtt" || endswith(name, "₊" * state_name * "ˍtt")
+                ansatz_subs[v] = Symbolics.unwrap(d2X)
+            elseif SymbolicUtils.iscall(v) && SymbolicUtils.operation(v) isa Differential &&
+                   strip_t(SymbolicUtils.arguments(v)[1]) == state_name
+                ansatz_subs[v] = Symbolics.unwrap(dX)
             end
         end
-        final_expr = Symbolics.substitute(Symbolics.unwrap(val_expanded), isolate)
-    else
-        final_expr = val_t
     end
 
-    return Num(final_expr)
+    substituted = Num(Symbolics.expand(Symbolics.expand_derivatives(Symbolics.substitute(expr, ansatz_subs))))
+
+    # Read off the requested harmonic. Symbolics.coeff returns the basis-function
+    # coefficient; the DC term is what remains once every cosₖ/sinₖ is zeroed.
+    if order == 0
+        zero_harmonics = Dict{Any, Any}()
+        for k in 1:(2*hs.N + 1)
+            zero_harmonics[Symbolics.unwrap(cos(Num(k) * hs.ω * t))] = 0.0
+            zero_harmonics[Symbolics.unwrap(sin(Num(k) * hs.ω * t))] = 0.0
+        end
+        return Num(Symbolics.substitute(Symbolics.unwrap(substituted), zero_harmonics))
+    end
+
+    basis = component == :Cos ? cos(Num(order) * hs.ω * t) : sin(Num(order) * hs.ω * t)
+    return Num(Symbolics.coeff(substituted, basis))
 end
-  
