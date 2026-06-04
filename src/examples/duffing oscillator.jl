@@ -50,7 +50,7 @@ perturbation[3] = 1.0e-3
 # Warm-start the working-point solve from the j-th sweep point (lands on the high branch)
 U₀ = sweep_res.solution[ω][:, j]
 Ω = collect(range(0.8, 1.2, 800))
-lin_prob = jls.HarmonicProblem(h_sys, Ω, ps; linear_response=(ωp, perturbation), U₀=U₀)
+lin_prob = jls.HarmonicProblem(h_sys, Ω, ps; linear_response=(ωp, perturbation))
 jls.solve!(lin_prob)
 
 # Response is stored as real/imag slices: solution[ω][coeff, Ω, (1=real, 2=imag)].

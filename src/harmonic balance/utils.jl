@@ -124,11 +124,13 @@ end
 
 
 function build_jacobians(rotated_system, vars, dvars)
+    print(vars)
     #TODO check ordering
     _jac = Symbolics.jacobian(rotated_system, vars)
     jac_0 = Num.((substitute(_jac, Dict(dvars .=> 0))))
     jac_1 = Symbolics.jacobian(rotated_system, dvars)
-    return jac_0, jac_1
+    return [rotated_system, vars, _jac]
+    #return jac_0, jac_1
 end
 
 function rotate_to_harmonic_frame(M, N, Nt, harmonic_system)
@@ -158,6 +160,7 @@ function rotate_to_harmonic_frame(M, N, Nt, harmonic_system)
         Γ_total[row_range, col_range] .= Γ_single
     end
     #ordering should be preserved as equations in colocation.jl are created in this order
-    rotated_system = Γ_total * [equation.lhs for equation in harmonic_system]  
+    rotated_system = Γ_total * [equation.lhs for equation in harmonic_system] 
+    rotated_system =  [equation.lhs for equation in harmonic_system]  
     return (rotated_system)
 end

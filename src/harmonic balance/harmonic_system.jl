@@ -29,6 +29,7 @@ struct HarmonicProblem
 end
 
 struct LinearisedProblem
+    harmonic_system::HarmonicSystem
     jacobian::Tuple{Matrix{Num},Matrix{Num}}
     ω_sweep::Tuple{Num, Union{Float64,Vector{Float64}}}
     parameters::Dict
@@ -186,7 +187,7 @@ function HarmonicProblem(harmonic_system::HarmonicSystem, ω_values::Union{Float
             end 
             for key in values(harmonic_system.variable_map)
         )
-        return LinearisedProblem(harmonic_system.jacobian, ω_sweep, parameters, parameter_sweep, working_point, pump_frequency, perturbation, output)
+        return LinearisedProblem(harmonic_system, harmonic_system.jacobian, ω_sweep, parameters, parameter_sweep, working_point, pump_frequency, perturbation, output)
      end
 end
 
@@ -204,6 +205,7 @@ function HarmonicSystem(sys, ωvar::Num, N::Int; tearing::Bool=true, determine_j
     states_arg = length(states) == 1 ? Num(states[1]) : states
     if determine_jacobian
         nonlinear_sys, X, variable_map, jac = harmonic_equation(eqs_arg, states_arg, tvar, ωvar, N; jac=true)
+        return jac
     else
         nonlinear_sys, X, variable_map = harmonic_equation(eqs_arg, states_arg, tvar, ωvar, N)
         jac = nothing

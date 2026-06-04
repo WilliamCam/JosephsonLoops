@@ -18,23 +18,23 @@ ps = Dict(
     jls.P1.Rsrc.R => 50.0,
     jls.C1.C => 100.0e-15,
     jls.J1.C => 1000.0e-15,
-    jls.J1.I0 => 1e-6,
+    jls.J1.I0 => jls.Φ₀/(2π*1000.0e-12),
     jls.J1.R => 10e3
 )
 
 #time domain simulation 
-tspan = (0.0, 1e-6)
-tsol = jls.tsolve(model, guesses, ps, tspan; guesses=guesses)
-p1 = jls.plot(tsol[jls.C1.i][end-400:end], title = "Transient Time Plot", xlabel = "t", ylabel = "I_C1")
+#tspan = (0.0, 1e-6)
+#tsol = jls.tsolve(model, guesses, ps, tspan; guesses=guesses)
+#p1 = jls.plot(tsol[jls.C1.i][end-400:end], title = "Transient Time Plot", xlabel = "t", ylabel = "I_C1")
 
 #hb Setup
 # Define the sweep range (8 to 10.0 GHz)
-ω_vec = collect(2*pi*(7:0.01:10.0)*1e9)
+ω_vec = collect(2*pi*(4.5:0.001:5.0)*1e9)
 
 
 sweep_params = delete!(ps, jls.P1.Isrc.ω)
 
-sys = jls.HarmonicSystem(model, jls.P1.Isrc.ω, 1)
+sys = jls.HarmonicSystem(model, jls.P1.Isrc.ω, 2)
 prob = jls.HarmonicProblem(sys, ω_vec, sweep_params)
 
 result = jls.solve!(prob)
@@ -42,7 +42,6 @@ out = prob.result.solution[jls.P1.Isrc.ω]
 
 current = jls.get_output(prob, result, "C1₊i", 1)
 theta_p_mag = jls.get_output(prob, result, "P1₊dθ",  1)
-
 
 Ii = @. (0.00565e-6 - current)
 Vi = @. (jls.Φ₀ / (2*pi) * real.(theta_p_mag)) 
@@ -52,15 +51,27 @@ ai = @. 0.5 * (Vi + Z0 * Ii) / sqrt(Z0)
 bi = @. 0.5 * (Vi - Z0 * Ii) / sqrt(Z0)
 p = jls.plot(ω_vec/(2*pi), 20*log10.(abs.(bi./ai)), xlabel="Frequency (Hz)", ylabel="S11 (dB)", title="RLC S-Parameter", lw=2)
 
-# Build HarmonicSystem once (expensive symbolic expansion, shared across problems)
+#Performing Linear analysis on system to find small signal gain
+sys = jls.HarmonicSystem(model, jls.P1.Isrc.ω, 2, determine_jacobian=true)
 resp = zeros(size(sys.jacobian[1],1))
-resp[11] = 1.0
-resp[12] = 1.0
-lin_prob = jls.HarmonicProblem(sys, ω_vec, sweep_params, linear_response = (2*pi*4.75001*1e9, resp))
+resp[12] = 1e-9
+resp[13] = 1e-9
+
+lin_prob = jls.HarmonicProblem(sys, ω_vec, sweep_params, linear_response = (2*pi*4.76*1e9, resp))
 # Solve
 sweep_res = jls.solve!(lin_prob)
 out = lin_prob.result.solution[jls.P1.Isrc.ω]
-plot(out[12,:])
+using Plots
+current = sqrt.(out[12,:].^2 + out[13,:].^2)
+voltage = sqrt.(out[17,:].^2 + out[18,:].^2)
+plot((abs.(voltage)))
+
+Ii = -sqrt(1e-9^2+1e-9^2)
+Vi = @. jls.Φ₀ / (2*pi) * (voltage)
+
+ai = @. 0.5 * (Vi + Z0 * Ii) / sqrt(Z0)
+bi = @. 0.5 * (Vi - Z0 * Ii) / sqrt(Z0)
+p = jls.plot(ω_vec/(2*pi), (abs.(bi./ai)), xlabel="Frequency (Hz)", ylabel="S11 (dB)", title="RLC S-Parameter", lw=2)
 
 
 #  JPA linearization (matches MIT JosephsonCircuits.jl JPA example)
