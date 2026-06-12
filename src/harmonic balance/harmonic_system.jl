@@ -82,41 +82,52 @@ function solve!(linear_problem::LinearisedProblem)
         println("Performing sweep $(ω) over $(length(ω_values)) points...")
         output_array = result.solution[ω]
         numeric_substitution = merge(linear_problem.parameters, linear_problem.working_point, Dict(ω => linear_problem.ω_pump))
-        J₀ = simplify(substitute(linear_problem.jacobian[1], numeric_substitution))
-        J₁ = simplify(substitute(linear_problem.jacobian[2], numeric_substitution))
+        # Float64 conversion errors loudly if any symbol survived the substitution
+        # (e.g. a missing working-point entry) instead of silently solving symbolically.
+        J₀ = Float64.(Symbolics.value.(substitute(linear_problem.jacobian[1], numeric_substitution)))
+        J₁ = Float64.(Symbolics.value.(substitute(linear_problem.jacobian[2], numeric_substitution)))
 
         U_small_signal = (linear_problem.U_perturbation)
 
         for (column_index, Ω) in enumerate(ω_values)
-            mat = simplify(J₀ - 1im * (Ω - linear_problem.ω_pump) * J₁)
-            resp = mat \ U_small_signal
-            output_array[:, column_index] .= resp
+            mat = J₀ - 1im * (Ω - linear_problem.ω_pump) * J₁
+            output_array[:, column_index] .= _linear_solve(mat, U_small_signal, column_index == 1)
         end
     else
         for param_sweep in linear_problem.parameter_sweep
             sweep_parameter = param_sweep.first
             sweep_values = param_sweep.second
             println("Performing 2D Sweep $(sweep_parameter) over $(length(ω_values)*length(sweep_values)) points...")
-            ps = copy(linear_problem.parameter_sweep)
             output_array = result.solution[sweep_parameter]
 
-            for (parameter_index,_val) in enumerate(sweep_values)
-                ps[sweep_parameter] = _val
-                numeric_substitution = merge(ps, linear_problem.U₀, Dict(ω => linear_problem.ω_pump))
-                J₀ = substitute(linear_problem.jacobian[1], numeric_substitution)
-                J₁ = substitute(linear_problem.jacobian[2], numeric_substitution)
+            U_small_signal = (linear_problem.U_perturbation)
 
-                U_small_signal = (linear_problem.U_perturbation)
+            for (parameter_index,_val) in enumerate(sweep_values)
+                numeric_substitution = merge(linear_problem.parameters, linear_problem.working_point,
+                    Dict(ω => linear_problem.ω_pump, sweep_parameter => _val))
+                J₀ = Float64.(Symbolics.value.(substitute(linear_problem.jacobian[1], numeric_substitution)))
+                J₁ = Float64.(Symbolics.value.(substitute(linear_problem.jacobian[2], numeric_substitution)))
 
                 for (column_index, Ω) in enumerate(ω_values)
                     mat = J₀ - 1im * (Ω - linear_problem.ω_pump) * J₁
-                    resp = mat \ perturb_c
-                    output_array[:, parameter_index, column_index] .= resp
+                    output_array[:, parameter_index, column_index] .= _linear_solve(mat, U_small_signal, column_index == 1)
                 end
             end
         end
 
     end
+    return result
+end
+
+# Solve (J₀ - iδJ₁)·resp = U. A coefficient that appears in no equation (e.g. the DC phase
+# of a capacitor, which only enters through D²θ) leaves an exactly-zero jacobian column,
+# making the matrix gauge-singular; fall back to the minimum-norm solution, which pins the
+# free coefficient's response to 0 — the physically sensible gauge.
+function _linear_solve(mat::AbstractMatrix, U::AbstractVector, warn_once::Bool)
+    F = LinearAlgebra.lu(mat; check = false)
+    LinearAlgebra.issuccess(F) && return F \ U
+    warn_once && @warn "Linearised jacobian is singular (free coefficient / gauge freedom); using the minimum-norm solution."
+    return LinearAlgebra.pinv(mat) * U
 end
 
 function _nl_solve_method!(prealloc_array::Array{ComplexF64}, problem::NonlinearSolve.NonlinearProblem, ω_variable::Num, ω_sweep_values::Union{Float64, Vector{Float64}}; 
@@ -150,6 +161,8 @@ function HarmonicProblem(harmonic_system::HarmonicSystem, ω_values::Union{Float
     ωvar = harmonic_system.ω
     ω_sweep = (ωvar, ω_values)
     system_unknowns = unknowns(system)
+    isnothing(linear_response) || !isnothing(harmonic_system.jacobian) ||
+        error("linear_response requires a HarmonicSystem built with determine_jacobian=true")
     _Nvars = isnothing(linear_response) ? length(system_unknowns) : size(harmonic_system.jacobian[1], 1)
 
     #Preallocate results object
