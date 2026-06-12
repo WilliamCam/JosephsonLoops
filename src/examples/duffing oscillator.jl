@@ -42,20 +42,19 @@ plot(ω_vec, solution)
 j  = 70
 ωp = ω_vec[j]
 
-# Probe: unit kick (1e-3) on x's sin@1 coefficient. For a single state the HB coefficients
-# are ordered [DC, cos₁, sin₁], so the sin@1 entry is index 3.
-perturbation = zeros(Float64, length(unknowns(h_sys.system)))
-perturbation[3] = 1.0e-3
+# Probe: unit kick (1e-3) on x's sin@1 equation row. perturbation_vector looks the row up
+# from the (variable, order, component) triple; the row ordering is [DC, cos₁, sin₁, ...]
+# per state (see linearised_row_map).
+perturbation = jls.perturbation_vector(h_sys, "x", 1, :Sin; amplitude=1.0e-3)
 
 # Warm-start the working-point solve from the j-th sweep point (lands on the high branch)
-U₀ = sweep_res.solution[ω][:, j]
+U₀ = real.(sweep_res.solution[ω][:, j])
 Ω = collect(range(0.8, 1.2, 800))
-lin_prob = jls.HarmonicProblem(h_sys, Ω, ps; linear_response=(ωp, perturbation))
+lin_prob = jls.HarmonicProblem(h_sys, Ω, ps; U₀=U₀, linear_response=(ωp, perturbation))
 jls.solve!(lin_prob)
 
-# Response is stored as real/imag slices: solution[ω][coeff, Ω, (1=real, 2=imag)].
-sol   = lin_prob.result.solution[ω]
-u_resp = sol[3, :]  # sin@1 response
-v_resp = sol[2, :]  # cos@1 response
-out = abs.((u_resp .+ 1im .* v_resp) ./ 2)
+# Response phasor of x at the fundamental, by name: A + iB with complex cos/sin envelope
+# responses A, B. The sideband amplitude at Ω is |A + iB|/2.
+x_resp = jls.get_output(h_sys, lin_prob, lin_prob.result, "x", 1)
+out = abs.(x_resp) ./ 2
 plot(Ω, out)

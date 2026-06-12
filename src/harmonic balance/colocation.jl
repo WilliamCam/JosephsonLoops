@@ -18,11 +18,12 @@ function harmonic_solution(N, tvar, wvar, Afourier, Bfourier; get_derivatives=fa
         if get_derivatives
             #dXdt
             dX += (dAfourier[n+1] + n*wvar*Bfourier[n]) * cos(n * wvar * tvar) + (dBfourier[n] - n*wvar*Afourier[n+1]) * sin(n * wvar * tvar)
-            #d2Xdt2
-            _cos_comp = (-(n*wvar)^2 * Afourier[n+1] - 2*n*wvar*dBfourier[n]) * cos(n * wvar * tvar)
-            _sin_comp = (-(n*wvar)^2 * Bfourier[n] + 2*n*wvar*dAfourier[n+1]) * sin(n * wvar * tvar)
+            #d2Xdt2 (exact: (A'' + 2nωB' - (nω)²A)cos + (B'' - 2nωA' - (nω)²B)sin, dropping
+            #the second-order slow envelope terms A''/B'')
+            _cos_comp = (-(n*wvar)^2 * Afourier[n+1] + 2*n*wvar*dBfourier[n]) * cos(n * wvar * tvar)
+            _sin_comp = (-(n*wvar)^2 * Bfourier[n] - 2*n*wvar*dAfourier[n+1]) * sin(n * wvar * tvar)
             d2X += _cos_comp + _sin_comp
-            push!(dvars, dAfourier[n+1], dBfourier[1])
+            push!(dvars, dAfourier[n+1], dBfourier[n])
             push!(vars, Afourier[n+1], Bfourier[n])
         end
     end
