@@ -19,7 +19,7 @@ ps = Dict(
     jls.C1.C => 100.0e-15,
     jls.J1.C => 1000.0e-15,
     jls.J1.I0 => jls.Φ₀/(2π*1000.0e-12),
-    jls.J1.R => 10e3
+    jls.J1.R => 50e3
 )
 
 #time domain simulation 
@@ -30,7 +30,6 @@ ps = Dict(
 #hb Setup
 # Define the sweep range (8 to 10.0 GHz)
 ω_vec = collect(2*pi*(4.5:0.001:5.0)*1e9)
-
 
 sweep_params = delete!(ps, jls.P1.Isrc.ω)
 
@@ -43,6 +42,8 @@ out = prob.result.solution[jls.P1.Isrc.ω]
 current = jls.get_output(prob, result, "C1₊i", 1)
 theta_p_mag = jls.get_output(prob, result, "P1₊dθ",  1)
 
+eq = jls.get_harmonic_expression(prob, "C1₊i", 1)
+
 Ii = @. (0.00565e-6 - current)
 Vi = @. (jls.Φ₀ / (2*pi) * real.(theta_p_mag)) 
 # Calculate Power Waves (a = incident, b = reflected)
@@ -54,19 +55,22 @@ p = jls.plot(ω_vec/(2*pi), 20*log10.(abs.(bi./ai)), xlabel="Frequency (Hz)", yl
 #Performing Linear analysis on system to find small signal gain
 sys = jls.HarmonicSystem(model, jls.P1.Isrc.ω, 2, determine_jacobian=true)
 resp = zeros(size(sys.jacobian[1],1))
-resp[12] = 1.0e-9
-resp[13] = 1.0e-9
-lin_prob = jls.HarmonicProblem(sys, ω_vec, sweep_params, linear_response = (2*pi*4.76*1e9, resp))
+resp[12] = 1e-11
+lin_prob = jls.HarmonicProblem(sys, ω_vec, sweep_params, linear_response = (2*pi*4.7501*1e9, resp))
 # Solve
-sweep_res = jls.solve!(lin_prob)
+@time sweep_res = jls.solve!(lin_prob)
 out = lin_prob.result.solution[jls.P1.Isrc.ω]
 using Plots
-current = sqrt.(out[12,:].^2 + out[13,:].^2)/jls.Φ₀
-voltage = sqrt.(out[17,:].^2 + out[18,:].^2)
-plot((abs.(voltage)))
+
+current_re = @. (out[3,:]*ω_vec + out[8,:]*ω_vec) / (-3.0385348964360245e15*50.0)
+current_im = @. 0.00565e-6 + (-out[2,:]*ω_vec - out[7,:]*ω_vec) / (-3.0385348964360245e15*50.0)
+
+
+current = sqrt.(out[12,:].^2 + out[13,:].^2)/jls.Φ₀^2
+voltage = sqrt.(out[17,:].^2 + out[18,:].^2)/jls.Φ₀^2
 
 Ii = -sqrt(1e-9^2+1e-9^2)
-Vi = (2*pi) * (voltage)
+Vi = jls.Φ₀/(2*pi) * (voltage)
 Z0=50
 ai = @. 0.5 * (Vi + Z0 * Ii) / sqrt(Z0)
 bi = @. 0.5 * (Vi - Z0 * Ii) / sqrt(Z0)

@@ -2,6 +2,7 @@ using Symbolics
 using SymbolicUtils
 using NonlinearSolve
 using BenchmarkTools
+using StaticArrays
 
 struct HarmonicSystem
     system::ModelingToolkit.AbstractSystem
@@ -81,14 +82,15 @@ function solve!(linear_problem::LinearisedProblem)
     if isnothing(linear_problem.parameter_sweep)
         println("Performing sweep $(ω) over $(length(ω_values)) points...")
         output_array = result.solution[ω]
+        K = size(linear_problem.jacobian[1],1)
         numeric_substitution = merge(linear_problem.parameters, linear_problem.working_point, Dict(ω => linear_problem.ω_pump))
-        J₀ = simplify(substitute(linear_problem.jacobian[1], numeric_substitution))
-        J₁ = simplify(substitute(linear_problem.jacobian[2], numeric_substitution))
+        J₀ = SMatrix{K,K}(simplify(substitute(linear_problem.jacobian[1], numeric_substitution)))
+        J₁ = SMatrix{K,K}(simplify(substitute(linear_problem.jacobian[2], numeric_substitution)))
 
-        U_small_signal = (linear_problem.U_perturbation)
+        U_small_signal = SVector{K}(linear_problem.U_perturbation)
 
         for (column_index, Ω) in enumerate(ω_values)
-            mat = simplify(J₀ - 1im * (Ω - linear_problem.ω_pump) * J₁)
+            mat = ((J₀ - 1im * (Ω - linear_problem.ω_pump) * J₁))
             resp = mat \ U_small_signal
             output_array[:, column_index] .= resp
         end
@@ -109,8 +111,8 @@ function solve!(linear_problem::LinearisedProblem)
                 U_small_signal = (linear_problem.U_perturbation)
 
                 for (column_index, Ω) in enumerate(ω_values)
-                    mat = J₀ - 1im * (Ω - linear_problem.ω_pump) * J₁
-                    resp = mat \ perturb_c
+                    mat = SJ₀ - 1im * (Ω - linear_problem.ω_pump) * J₁
+                    resp = mat \ U_small_signal
                     output_array[:, parameter_index, column_index] .= resp
                 end
             end
