@@ -71,7 +71,7 @@ jpa_params[jls.P1.Isrc.I] = 11.3e-9
 
 # 1 nA test signal on the port current source: U = -∂F/∂I locates the source equation
 # rows, quadratures, signs and equation scalings automatically.
-δI = 1.0e-9
+δI = 1.0e-10
 pert = jls.source_perturbation_vector(sys, jls.P1.Isrc.I, jpa_params; amplitude=δI)
 
 # Pump working point via downward continuation (5.0 GHz → ωp): the softening junction

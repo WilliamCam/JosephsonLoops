@@ -101,7 +101,7 @@ end
         R = 1.0
         I0 = 1.0
     end
-    @equations begin
+    @equations begin 
         D2(θ) ~ (i - I0*sin(θ) - D(θ)*Φ₀/(2*pi*R))*(2*pi)/(Φ₀*C)  
     end
 end
