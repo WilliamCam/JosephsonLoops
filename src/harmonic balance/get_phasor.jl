@@ -141,6 +141,46 @@ function source_perturbation_vector(h_sys::HarmonicSystem, source_param::Num, pa
     return U
 end
 
+# Rotate a perturbation vector by 90° in the harmonic frame (cos ↔ sin per harmonic),
+# giving the orthogonal signal quadrature. Used to probe the squeezed quadrature of a
+# phase-sensitive (degenerate) parametric amplifier; pair with phase_preserving_s11.
+function rotate_quadrature(h_sys::HarmonicSystem, U::AbstractVector)
+    rows = linearised_row_map(h_sys)
+    inv_rows = Dict(v => k for (k, v) in rows)
+    U2 = zeros(eltype(U), length(U))
+    for (row, val) in enumerate(U)
+        val == 0 && continue
+        name, order, comp = inv_rows[row]
+        if comp == :Cos
+            U2[rows[(name, order, :Sin)]] = val
+        elseif comp == :Sin
+            U2[rows[(name, order, :Cos)]] = val
+        else                                   # DC term has no quadrature partner
+            U2[row] = val
+        end
+    end
+    return U2
+end
+
+# Phase-preserving (signal-to-signal) reflection magnitude |S_ss| from the port-voltage
+# responses to two orthogonal quadrature current drives of amplitude `δI0`: `V_cos` to a
+# cos (in-phase, X) drive and `V_sin` to a sin (quadrature, P) drive. A degenerate
+# parametric amplifier is phase-SENSITIVE — a single real-quadrature injection measures the
+# amplified (or squeezed) quadrature, not the phase-preserving gain that nodal HB codes
+# (e.g. JosephsonCircuits.jl) report. The reflected field per unit drive is r_X = 2V_cos/(Z0
+# δI0) − 1 and r_P = 2V_sin/(Z0 δI0) − i (the P-drive's incident wave is 90° rotated, hence
+# −i). Their real/imag parts form a 2×2 field-transfer matrix whose singular values σ± are
+# the amplified/squeezed quadrature gains; the phase-preserving magnitude is the mean,
+# |S_ss| = (σ₊ + σ₋)/2 (idler |S_si| = (σ₊ − σ₋)/2). Passively σ₊ = σ₋ → ordinary |S11|.
+function phase_preserving_s11(V_cos::AbstractVector, V_sin::AbstractVector, Z0::Real, δI0::Real)
+    map(zip(V_cos, V_sin)) do (vc, vs)
+        r_X = 2vc/(Z0*δI0) - 1
+        r_P = 2vs/(Z0*δI0) - im
+        σ = LinearAlgebra.svdvals([real(r_X) real(r_P); imag(r_X) imag(r_P)])
+        (σ[1] + σ[2]) / 2
+    end
+end
+
 #  Harmonic expressions
 
 # Symbolic (cos, sin) Fourier coefficients of `var_name` at the requested order. A state's

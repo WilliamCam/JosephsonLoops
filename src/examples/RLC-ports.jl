@@ -19,7 +19,7 @@ ps = Dict(
     jls.C1.C => 100.0e-15,
     jls.J1.C => 1000.0e-15,
     jls.J1.I0 => jls.Φ₀/(2π*1000.0e-12),
-    jls.J1.R => 10e3
+    jls.J1.R => 1e12
 )
 
 #time domain simulation 
@@ -34,7 +34,7 @@ ps = Dict(
 
 sweep_params = delete!(ps, jls.P1.Isrc.ω)
 
-sys = jls.HarmonicSystem(model, jls.P1.Isrc.ω, 2)
+sys = jls.HarmonicSystem(model, jls.P1.Isrc.ω, 16)
 prob = jls.HarmonicProblem(sys, ω_vec, sweep_params)
 
 result = jls.solve!(prob)
@@ -67,7 +67,7 @@ jls.linearised_row_map(sys)
 #     gain peaks (+13.3 dB at the degenerate point).
 ωp = 2*pi*4.75001e9
 jpa_params = copy(sweep_params)
-jpa_params[jls.P1.Isrc.I] = 15.0e-9
+jpa_params[jls.P1.Isrc.I] = 11.3e-9
 
 # 1 nA test signal on the port current source: U = -∂F/∂I locates the source equation
 # rows, quadratures, signs and equation scalings automatically.
@@ -85,16 +85,32 @@ U₀ = real.(pump_prob.result.solution[jls.P1.Isrc.ω][:, end])
 lin_prob = jls.HarmonicProblem(sys, Ω_vec, jpa_params; U₀=U₀, linear_response = (ωp, pert))
 lin_res = jls.solve!(lin_prob)
 
-# Response phasors by name (A + iB with complex cos/sin envelope responses)
-current_p = jls.get_output(sys, lin_prob, lin_res, "P1₊i", 1)
-theta_p   = jls.get_output(sys, lin_prob, lin_res, "P1₊dθ", 1)
+# Port voltage response to the sin (P-quadrature) source drive. V = Φ₀/2π · dθ.
+Z0 = 50.0
+V_sin = (jls.Φ₀ / (2*pi)) .* jls.get_output(sys, lin_prob, lin_res, "P1₊dθ", 1)
 
-# S11 at the Norton port (Isrc ∥ Rsrc ∥ DUT share one node pair, so V_DUT = V_port and
-# I_DUT = δI - V/Z0):  a = √Z0·δI/2,  b = (2V - Z0·δI)/(2√Z0)  ⇒  S11 = 2V/(Z0·δI) - 1.
-# V = Φ₀/2π · dθ response; the sin-source perturbation δI has phasor i·δI.
-V   = @. (jls.Φ₀ / (2*pi)) * theta_p
-Z0  = 50.0
-S11 = @. 2V / (Z0 * (im * δI)) - 1
-jls.plot(Ω_vec/(2*pi*1e9), 20*log10.(abs.(S11)),
-    xlabel="Frequency (GHz)", ylabel="S11 (dB)",
-    title="JPA linearised S11", lw=2, label="JosephsonLoops")
+# Single-quadrature S11 at the Norton port (Isrc ∥ Rsrc ∥ DUT share one node pair, so
+# V_DUT = V_port and I_DUT = δI − V/Z0):  S11 = 2V/(Z0·δI) − 1, with the sin drive's δI
+# phasor i·δI. At the degenerate point this measures the AMPLIFIED quadrature (~+19 dB).
+S11_amp = @. 2V_sin / (Z0 * (im * δI)) - 1
+
+# A degenerate JPA is phase-SENSITIVE: the single quadrature above is the amplified (or
+# squeezed) gain, not the phase-PRESERVING signal gain |S_ss| that nodal HB codes
+# (JosephsonCircuits.jl) report. Recover |S_ss| by also driving the orthogonal (cos)
+# quadrature and combining: |S_ss| = (σ₊ + σ₋)/2 of the 2×2 quadrature field-transfer map.
+# This is the curve to compare against JosephsonCircuits' S(0,0) (≈ +13.3 dB here).
+pert_cos = jls.rotate_quadrature(sys, pert)
+lin_cos  = jls.HarmonicProblem(sys, Ω_vec, jpa_params; U₀=U₀, linear_response=(ωp, pert_cos))
+jls.solve!(lin_cos)
+V_cos = (jls.Φ₀ / (2*pi)) .* jls.get_output(sys, lin_cos, lin_cos.result, "P1₊dθ", 1)
+S_ss  = jls.phase_preserving_s11(V_cos, V_sin, Z0, δI)
+
+p_amp = jls.plot(Ω_vec/(2*pi*1e9), 20*log10.(abs.(S11_amp)),
+    xlabel="Frequency (GHz)", ylabel="Gain (dB)",
+    title="Amplified quadrature (phase-sensitive)",
+    lw=2, legend=false)
+
+p_ss = jls.plot(Ω_vec/(2*pi*1e9), 20*log10.(S_ss),
+    xlabel="Frequency (GHz)", ylabel="Gain (dB)",
+    title="Phase-preserving |S_ss| (matches JosephsonCircuits.jl)",
+    lw=2, ls=:dash, legend=false)
