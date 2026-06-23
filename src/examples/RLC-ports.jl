@@ -19,7 +19,7 @@ ps = Dict(
     jls.C1.C => 100.0e-15,
     jls.J1.C => 1000.0e-15,
     jls.J1.I0 => jls.Φ₀/(2π*1000.0e-12),
-    jls.J1.R => 10e3
+    jls.J1.R => 1e12
 )
 
 #time domain simulation 
@@ -67,11 +67,11 @@ jls.linearised_row_map(sys)
 #     gain peaks (+13.3 dB at the degenerate point).
 ωp = 2*pi*4.75001e9
 jpa_params = copy(sweep_params)
-jpa_params[jls.P1.Isrc.I] = 15.0e-9
+jpa_params[jls.P1.Isrc.I] = 11.3e-9
 
 # 1 nA test signal on the port current source: U = -∂F/∂I locates the source equation
 # rows, quadratures, signs and equation scalings automatically.
-δI = 1.0e-9
+δI = 1.0e-10
 pert = jls.source_perturbation_vector(sys, jls.P1.Isrc.I, jpa_params; amplitude=δI)
 
 # Pump working point via downward continuation (5.0 GHz → ωp): the softening junction
