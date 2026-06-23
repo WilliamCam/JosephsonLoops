@@ -42,45 +42,27 @@ end
 # the rotated equations carry the same interleaved ordering (rotate_to_harmonic_frame), so
 # the maps below address both the perturbation vector and the response array.
 
-# Position k of each state in the assembly order of harmonic_equation. The k-th entry of
-# harmonic_ansatz is the k-th state's ansatz, so a state's position is wherever its DC
-# coefficient symbol appears.
-function linearised_state_order(h_sys::HarmonicSystem)
-    ansatz = h_sys.harmonic_ansatz
-    order = Dict{String, Int}()
-    for name in unique(key[1] for key in keys(h_sys.variable_map))
-        dc = Symbolics.unwrap(h_sys.variable_map[(name, 0, :Cos)])
-        k = findfirst(X -> any(v -> isequal(v, dc), Symbolics.get_variables(X)), ansatz)
-        k === nothing && error("State $name not found in harmonic ansatz")
-        order[name] = k
-    end
-    return order
+# The coefficient symbols in jacobian-column order — `h_sys.jacobian_vars`, the `vars`
+# vector build_jacobians differentiated against, which the linearised response inherits.
+# This is the single source of truth; linearised_row_map derives from it.
+function linearised_vars(h_sys::HarmonicSystem)
+    isnothing(h_sys.jacobian_vars) &&
+        error("linearised_vars requires a HarmonicSystem built with determine_jacobian=true")
+    return h_sys.jacobian_vars
 end
 
 # (state name, order, :Cos/:Sin) -> row in the linearised perturbation/response vectors.
+# Each column symbol in jacobian_vars is reverse-looked-up in variable_map, so the stored
+# vars vector alone fixes every index — no separate layout arithmetic to keep in sync.
 function linearised_row_map(h_sys::HarmonicSystem)
-    block = 2 * h_sys.N + 1
+    sym_to_key = Dict(Symbolics.unwrap(v) => k for (k, v) in h_sys.variable_map)
     rows = Dict{Tuple{String, Int, Symbol}, Int}()
-    for (name, k) in linearised_state_order(h_sys)
-        base = (k - 1) * block
-        rows[(name, 0, :Cos)] = base + 1
-        for n in 1:h_sys.N
-            rows[(name, n, :Cos)] = base + 2n
-            rows[(name, n, :Sin)] = base + 2n + 1
-        end
+    for (idx, var) in enumerate(linearised_vars(h_sys))
+        key = get(sym_to_key, Symbolics.unwrap(var), nothing)
+        key === nothing && error("Coefficient $(var) at column $idx is not in variable_map")
+        rows[key] = idx
     end
     return rows
-end
-
-# The coefficient symbols in linearised row order (the `vars` vector the jacobians were
-# built against).
-function linearised_vars(h_sys::HarmonicSystem)
-    rows = linearised_row_map(h_sys)
-    vars = Vector{Num}(undef, length(rows))
-    for (key, idx) in rows
-        vars[idx] = h_sys.variable_map[key]
-    end
-    return vars
 end
 
 

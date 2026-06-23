@@ -11,6 +11,10 @@ struct HarmonicSystem
     harmonic_ansatz::Any
     variable_map::Dict{Tuple{String, Int, Symbol}, Num}
     jacobian::Union{Tuple{Matrix{Num}, Matrix{Num}},Nothing}
+    # Column ordering of `jacobian` — the `vars` vector build_jacobians differentiated
+    # against, and the order the linearised response inherits. The single source of truth
+    # for linearised row/response indexing. `nothing` when built without a jacobian.
+    jacobian_vars::Union{Vector{Num},Nothing}
 end
 
 struct HarmonicResult
@@ -217,10 +221,11 @@ function HarmonicSystem(sys, ωvar::Num, N::Int; tearing::Bool=true, determine_j
     eqs_arg    = length(states) == 1 ? eqs[1]         : eqs
     states_arg = length(states) == 1 ? Num(states[1]) : states
     if determine_jacobian
-        nonlinear_sys, X, variable_map, jac = harmonic_equation(eqs_arg, states_arg, tvar, ωvar, N; jac=true)
+        nonlinear_sys, X, variable_map, jac, jac_vars = harmonic_equation(eqs_arg, states_arg, tvar, ωvar, N; jac=true)
     else
         nonlinear_sys, X, variable_map = harmonic_equation(eqs_arg, states_arg, tvar, ωvar, N)
         jac = nothing
+        jac_vars = nothing
     end
     
     sys_eqs, sys_vars = equations(nonlinear_sys), unknowns(nonlinear_sys)
@@ -237,5 +242,5 @@ function HarmonicSystem(sys, ωvar::Num, N::Int; tearing::Bool=true, determine_j
     @named nonlinear_sys = NonlinearSystem(sys_eqs_built, sys_vars, parameters(sys))
     complete_sys = tearing ? mtkcompile(nonlinear_sys) : complete(nonlinear_sys)
 
-    return HarmonicSystem(complete_sys, sys, ωvar, N, X, variable_map, jac)
+    return HarmonicSystem(complete_sys, sys, ωvar, N, X, variable_map, jac, jac_vars)
 end
