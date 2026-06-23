@@ -83,37 +83,28 @@ function linearised_vars(h_sys::HarmonicSystem)
     return vars
 end
 
-# Small-signal injection vector: a kick of `amplitude` on the row addressed by
-# (var_name, order, component). NB: rows are EQUATION-block rows — block k holds the k-th
-# time-domain equation, which for multi-state systems is not necessarily var_name's own
-# equation (states and equations are ordered independently by get_full_equations). For a
-# physical source perturbation prefer source_perturbation_vector, which locates the right
-# equation by the source parameter itself.
-function perturbation_vector(h_sys::HarmonicSystem, var_name::String, order::Int = 1,
-                             component::Symbol = :Sin; amplitude::Float64 = 1.0)
-    rows = linearised_row_map(h_sys)
-    haskey(rows, (var_name, order, component)) ||
-        error("($var_name, $order, $component) is not a state harmonic. States: $(sort!(unique(k[1] for k in keys(rows))))")
-    U = zeros(Float64, length(rows))
-    U[rows[(var_name, order, component)]] = amplitude
-    return U
-end
 
-# Injection vector for perturbing a sinusoidal source amplitude (e.g. P1₊Isrc₊I):
-# U = -∂F/∂param · amplitude, where F are the rotated harmonic equations. The forcing
-# profile ∂(residual)/∂param is read from each time-domain equation containing the
-# parameter and projected onto the harmonic basis, so the equation rows, quadratures,
-# signs AND equation scalings (e.g. the 2π/(Φ₀C) of a junction equation) are all
-# determined automatically. `parameters` supplies numeric values for parameters that
-# multiply the source term inside an equation. Perturbing a current source by δI then
-# gives the small-signal response to an extra δI·(source waveform at Ω) drive, in
-# source units.
+# Pure upper-sideband ("signal") injection vector for a small test tone on a sinusoidal source
+# parameter (e.g. P1₊Isrc₊I). The physical drive D = −∂F/∂param·amplitude is read straight from
+# the time-domain equations — projecting each equation's ∂(residual)/∂param onto the harmonic
+# basis fixes the equation rows, quadratures, signs and scalings (e.g. the 2π/(Φ₀C) of a
+# junction) automatically. That single real quadrature is then combined with its 90°-rotated
+# partner (cos ↔ sin per harmonic) into the COMPLEX injection U = U_cos − i·U_sin, the
+# harmonic-frame image of a single tone e^{+iΩt}: a pure signal sideband with no idler.
+#
+# Driving U and reading the upper-sideband response gives the phase-PRESERVING reflection
+# S(0,0) directly (complex, so the phase survives), the signal-to-signal scattering that nodal
+# HB codes (JosephsonCircuits.jl) report. A real single-quadrature drive would instead see only
+# the amplified/squeezed quadrature of a degenerate (phase-sensitive) parametric amplifier;
+# combining the two quadratures here is the whole fix. Passively (no pump) U reduces to the
+# ordinary linear drive and S(0,0) to the ordinary linear S11. `parameters` supplies numeric
+# values for any parameter that multiplies the source term.
 function source_perturbation_vector(h_sys::HarmonicSystem, source_param::Num, parameters::Dict; amplitude::Float64 = 1.0)
     t = Num(ModelingToolkit.get_iv(h_sys.time_domain_system))
     eqs, _states = get_full_equations(h_sys.time_domain_system, t)
     N, ω = h_sys.N, h_sys.ω
     block = 2N + 1
-    U = zeros(Float64, length(eqs) * block)
+    D = zeros(Float64, length(eqs) * block)        # physical (real, single-quadrature) drive
 
     # numeric parameter values, never the swept ω (it is part of the harmonic basis)
     fixed_params = Dict(k => v for (k, v) in parameters if !isequal(Num(k), ω))
@@ -131,54 +122,32 @@ function source_perturbation_vector(h_sys::HarmonicSystem, source_param::Num, pa
         isequal(Symbolics.simplify(profile), Num(0)) && continue
         found = true
         base = (k - 1) * block
-        U[base + 1] -= amplitude * as_number(Symbolics.substitute(profile, zero_harmonics))
+        D[base + 1] -= amplitude * as_number(Symbolics.substitute(profile, zero_harmonics))
         for n in 1:N
-            U[base + 2n]     -= amplitude * as_number(Symbolics.coeff(profile, cos(Num(n) * ω * t)))
-            U[base + 2n + 1] -= amplitude * as_number(Symbolics.coeff(profile, sin(Num(n) * ω * t)))
+            D[base + 2n]     -= amplitude * as_number(Symbolics.coeff(profile, cos(Num(n) * ω * t)))
+            D[base + 2n + 1] -= amplitude * as_number(Symbolics.coeff(profile, sin(Num(n) * ω * t)))
         end
     end
     found || error("Parameter $source_param does not appear in any time-domain equation")
-    return U
-end
 
-# Rotate a perturbation vector by 90° in the harmonic frame (cos ↔ sin per harmonic),
-# giving the orthogonal signal quadrature. Used to probe the squeezed quadrature of a
-# phase-sensitive (degenerate) parametric amplifier; pair with phase_preserving_s11.
-function rotate_quadrature(h_sys::HarmonicSystem, U::AbstractVector)
+    # Combine into the pure upper sideband U = U_cos − i·U_sin. U_sin is the physical drive D;
+    # U_cos is D rotated 90° in the harmonic frame (cos ↔ sin per harmonic). Building both from
+    # the same projection keeps it correct for any source phase, and reduces to D passively.
     rows = linearised_row_map(h_sys)
-    inv_rows = Dict(v => k for (k, v) in rows)
-    U2 = zeros(eltype(U), length(U))
-    for (row, val) in enumerate(U)
+    inv_rows = Dict(v => key for (key, v) in rows)
+    U = ComplexF64.(-im .* D)                       # −i·U_sin
+    for (row, val) in enumerate(D)
         val == 0 && continue
         name, order, comp = inv_rows[row]
-        if comp == :Cos
-            U2[rows[(name, order, :Sin)]] = val
-        elseif comp == :Sin
-            U2[rows[(name, order, :Cos)]] = val
-        else                                   # DC term has no quadrature partner
-            U2[row] = val
+        if order == 0                               # DC term has no sideband partner
+            U[row] += val
+        elseif comp == :Cos
+            U[rows[(name, order, :Sin)]] += val     # rotate cos → sin
+        else
+            U[rows[(name, order, :Cos)]] += val     # rotate sin → cos
         end
     end
-    return U2
-end
-
-# Phase-preserving (signal-to-signal) reflection magnitude |S_ss| from the port-voltage
-# responses to two orthogonal quadrature current drives of amplitude `δI0`: `V_cos` to a
-# cos (in-phase, X) drive and `V_sin` to a sin (quadrature, P) drive. A degenerate
-# parametric amplifier is phase-SENSITIVE — a single real-quadrature injection measures the
-# amplified (or squeezed) quadrature, not the phase-preserving gain that nodal HB codes
-# (e.g. JosephsonCircuits.jl) report. The reflected field per unit drive is r_X = 2V_cos/(Z0
-# δI0) − 1 and r_P = 2V_sin/(Z0 δI0) − i (the P-drive's incident wave is 90° rotated, hence
-# −i). Their real/imag parts form a 2×2 field-transfer matrix whose singular values σ± are
-# the amplified/squeezed quadrature gains; the phase-preserving magnitude is the mean,
-# |S_ss| = (σ₊ + σ₋)/2 (idler |S_si| = (σ₊ − σ₋)/2). Passively σ₊ = σ₋ → ordinary |S11|.
-function phase_preserving_s11(V_cos::AbstractVector, V_sin::AbstractVector, Z0::Real, δI0::Real)
-    map(zip(V_cos, V_sin)) do (vc, vs)
-        r_X = 2vc/(Z0*δI0) - 1
-        r_P = 2vs/(Z0*δI0) - im
-        σ = LinearAlgebra.svdvals([real(r_X) real(r_P); imag(r_X) imag(r_P)])
-        (σ[1] + σ[2]) / 2
-    end
+    return U
 end
 
 #  Harmonic expressions

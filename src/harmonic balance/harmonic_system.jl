@@ -36,7 +36,7 @@ struct LinearisedProblem
     parameter_sweep::Union{Dict{Num, Vector{Float64}},Nothing}
     working_point::Dict{Num, Float64}
     ω_pump::Float64
-    U_perturbation::Vector{Float64}
+    U_perturbation::Vector{ComplexF64}
     result::HarmonicResult
 end
 
@@ -154,7 +154,7 @@ end
 function HarmonicProblem(harmonic_system::HarmonicSystem, ω_values::Union{Float64, Vector{Float64}}, parameters::Dict; 
         parameter_sweep::Union{Dict{Num, Vector{Float64}}, Nothing}=nothing, 
         U₀::Union{Vector{Float64},Nothing} = nothing, 
-        linear_response::Union{Tuple{Float64,Vector{Float64}},Nothing} = nothing,
+        linear_response::Union{Tuple{Float64,<:AbstractVector},Nothing} = nothing,
         kwargs...
     )
     system = harmonic_system.system
@@ -200,7 +200,7 @@ function HarmonicProblem(harmonic_system::HarmonicSystem, ω_values::Union{Float
             end 
             for key in values(harmonic_system.variable_map)
         )
-        return LinearisedProblem(harmonic_system, harmonic_system.jacobian, ω_sweep, parameters, parameter_sweep, working_point, pump_frequency, perturbation, output)
+        return LinearisedProblem(harmonic_system, harmonic_system.jacobian, ω_sweep, parameters, parameter_sweep, working_point, pump_frequency, ComplexF64.(perturbation), output)
      end
 end
 
