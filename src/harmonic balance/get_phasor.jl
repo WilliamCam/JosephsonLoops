@@ -38,32 +38,12 @@ end
 #
 # The linearised solve works in the coefficient ordering of the jacobians, NOT in
 # unknowns(system) order: build_jacobians differentiates with respect to `vars`, which
-# harmonic_equation assembles state by state as [DC, cos₁, sin₁, cos₂, sin₂, ...]. Rows of
-# the rotated equations carry the same interleaved ordering (rotate_to_harmonic_frame), so
-# the maps below address both the perturbation vector and the response array.
-
-# The coefficient symbols in jacobian-column order — `h_sys.jacobian_vars`, the `vars`
-# vector build_jacobians differentiated against, which the linearised response inherits.
-# This is the single source of truth; linearised_row_map derives from it.
-function linearised_vars(h_sys::HarmonicSystem)
-    isnothing(h_sys.jacobian_vars) &&
-        error("linearised_vars requires a HarmonicSystem built with determine_jacobian=true")
-    return h_sys.jacobian_vars
-end
-
-# (state name, order, :Cos/:Sin) -> row in the linearised perturbation/response vectors.
-# Each column symbol in jacobian_vars is reverse-looked-up in variable_map, so the stored
-# vars vector alone fixes every index — no separate layout arithmetic to keep in sync.
-function linearised_row_map(h_sys::HarmonicSystem)
-    sym_to_key = Dict(Symbolics.unwrap(v) => k for (k, v) in h_sys.variable_map)
-    rows = Dict{Tuple{String, Int, Symbol}, Int}()
-    for (idx, var) in enumerate(linearised_vars(h_sys))
-        key = get(sym_to_key, Symbolics.unwrap(var), nothing)
-        key === nothing && error("Coefficient $(var) at column $idx is not in variable_map")
-        rows[key] = idx
-    end
-    return rows
-end
+# harmonic_equation assembles per state (in get_full_equations order) as
+# [DC, cos₁, sin₁, cos₂, sin₂, ...]. The rotated equation rows carry the same interleaved
+# ordering, so the response array and the perturbation vector share it. The ordering isn't
+# stored — it is rebuilt where needed from variable_map + the state order (the loop in
+# apply_harmonic_expression below). To find the row of a named coefficient by hand:
+# findfirst(isequal(variable_map[(name, n, :Cos)]), <that rebuilt vector>).
 
 
 # Pure upper-sideband ("signal") injection vector for a small test tone on a sinusoidal source
@@ -82,7 +62,7 @@ end
 # ordinary linear drive and S(0,0) to the ordinary linear S11. `parameters` supplies numeric
 # values for any parameter that multiplies the source term.
 
-#jacobian of the system  does this already 
+
 function source_perturbation_vector(h_sys::HarmonicSystem, source_param::Num, parameters::Dict; amplitude::Float64 = 1.0)
     t = Num(ModelingToolkit.get_iv(h_sys.time_domain_system))
     eqs, _states = get_full_equations(h_sys.time_domain_system, t)
@@ -115,20 +95,16 @@ function source_perturbation_vector(h_sys::HarmonicSystem, source_param::Num, pa
     found || error("Parameter $source_param does not appear in any time-domain equation")
 
     # Combine into the pure upper sideband U = U_cos − i·U_sin. U_sin is the physical drive D;
-    # U_cos is D rotated 90° in the harmonic frame (cos ↔ sin per harmonic). Building both from
-    # the same projection keeps it correct for any source phase, and reduces to D passively.
-    rows = linearised_row_map(h_sys)
-    inv_rows = Dict(v => key for (key, v) in rows)
+    # U_cos is D rotated 90° in the harmonic frame (cos ↔ sin per harmonic). The block layout
+    # is [DC, cos₁, sin₁, cos₂, sin₂, ...] per equation (block = 2N+1), so the swap is purely
+    # positional: keep each block's DC entry and swap every (cos_n, sin_n) pair. The DC term
+    # has no sideband partner. This reduces to D passively (no pump).
     U = ComplexF64.(-im .* D)                       # −i·U_sin
-    for (row, val) in enumerate(D)
-        val == 0 && continue
-        name, order, comp = inv_rows[row]
-        if order == 0                               # DC term has no sideband partner
-            U[row] += val
-        elseif comp == :Cos
-            U[rows[(name, order, :Sin)]] += val     # rotate cos → sin
-        else
-            U[rows[(name, order, :Cos)]] += val     # rotate sin → cos
+    for base in 0:block:(length(D) - block)
+        U[base + 1] += D[base + 1]                  # DC: no rotation
+        for n in 1:N
+            U[base + 2n]     += D[base + 2n + 1]    # cos row gets the sin value
+            U[base + 2n + 1] += D[base + 2n]        # sin row gets the cos value
         end
     end
     return U
@@ -187,7 +163,24 @@ function apply_harmonic_expression(h_sys::HarmonicSystem, lin_prob::LinearisedPr
 
     solution = result.solution[ω]
 
-    f_re, f_im = compile_phasor(expression, Symbolics.unwrap.(linearised_vars(h_sys)),
+    # Rebuild the response-row ordering (= jacobian columns): per state in get_full_equations
+    # order, the coefficients [DC, cos₁, sin₁, cos₂, sin₂, ...] pulled from variable_map. This
+    # matches how harmonic_equation assembled `vars`, so the compiled phasor reads each
+    # coefficient from the correct response row.
+    tvar = Num(ModelingToolkit.get_iv(h_sys.time_domain_system))
+    _, states = get_full_equations(h_sys.time_domain_system, tvar)
+    vmap = h_sys.variable_map
+    vars = Num[]
+    for s in states
+        name = strip_t(s)
+        push!(vars, vmap[(name, 0, :Cos)])
+        for n in 1:h_sys.N
+            push!(vars, vmap[(name, n, :Cos)])
+            push!(vars, vmap[(name, n, :Sin)])
+        end
+    end
+
+    f_re, f_im = compile_phasor(expression, Symbolics.unwrap.(vars),
                                 lin_prob.parameters, h_sys.system, ω)
 
     return map(axes(solution, 2)) do i

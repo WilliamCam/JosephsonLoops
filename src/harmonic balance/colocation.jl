@@ -130,9 +130,7 @@ function harmonic_equation(eqs, states, tvar, wvar, N; jac=false)
         rotated_system = rotate_to_harmonic_frame(M, N, Nt, d_harmonic_system)
         #TODO: Check orderiing for M>1 larger systems
         J0, J1 = build_jacobians(rotated_system, vars, dvars)
-        # `vars` is the column ordering of the jacobians; return it so the linearised
-        # response can be mapped back to named coefficients without reconstructing it.
-        return sys, X, variable_map, (J0, J1), Num.(vars)
+        return sys, X, variable_map, (J0, J1)
     else
         return sys, X, variable_map
     end
