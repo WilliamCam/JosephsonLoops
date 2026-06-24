@@ -88,27 +88,16 @@ function solve!(linear_problem::LinearisedProblem)
         output_array = result.solution[ω]
         K = size(linear_problem.jacobian[1],1)
         numeric_substitution = merge(linear_problem.parameters, linear_problem.working_point, Dict(ω => linear_problem.ω_pump))
-<<<<<<< HEAD
         # Float64 conversion errors loudly if any symbol survived the substitution
         # (e.g. a missing working-point entry) instead of silently solving symbolically.
         J₀ = Float64.(Symbolics.value.(substitute(linear_problem.jacobian[1], numeric_substitution)))
         J₁ = Float64.(Symbolics.value.(substitute(linear_problem.jacobian[2], numeric_substitution)))
-=======
-        J₀ = SMatrix{K,K}(simplify(substitute(linear_problem.jacobian[1], numeric_substitution)))
-        J₁ = SMatrix{K,K}(simplify(substitute(linear_problem.jacobian[2], numeric_substitution)))
->>>>>>> origin/main
 
         U_small_signal = SVector{K}(linear_problem.U_perturbation)
 
         for (column_index, Ω) in enumerate(ω_values)
-<<<<<<< HEAD
             mat = J₀ - 1im * (Ω - linear_problem.ω_pump) * J₁
             output_array[:, column_index] .= _linear_solve(mat, U_small_signal, column_index == 1)
-=======
-            mat = ((J₀ - 1im * (Ω - linear_problem.ω_pump) * J₁))
-            resp = mat \ U_small_signal
-            output_array[:, column_index] .= resp
->>>>>>> origin/main
         end
     else
         for param_sweep in linear_problem.parameter_sweep
@@ -126,14 +115,8 @@ function solve!(linear_problem::LinearisedProblem)
                 J₁ = Float64.(Symbolics.value.(substitute(linear_problem.jacobian[2], numeric_substitution)))
 
                 for (column_index, Ω) in enumerate(ω_values)
-<<<<<<< HEAD
                     mat = J₀ - 1im * (Ω - linear_problem.ω_pump) * J₁
                     output_array[:, parameter_index, column_index] .= _linear_solve(mat, U_small_signal, column_index == 1)
-=======
-                    mat = SJ₀ - 1im * (Ω - linear_problem.ω_pump) * J₁
-                    resp = mat \ U_small_signal
-                    output_array[:, parameter_index, column_index] .= resp
->>>>>>> origin/main
                 end
             end
         end

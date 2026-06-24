@@ -19,7 +19,6 @@ ps = Dict(
     jls.C1.C => 100.0e-15,
     jls.J1.C => 1000.0e-15,
     jls.J1.I0 => jls.Φ₀/(2π*1000.0e-12),
-    jls.J1.R => 50e3
     jls.J1.R => 1e12
 )
 
