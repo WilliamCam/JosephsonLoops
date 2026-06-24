@@ -56,8 +56,8 @@ p = jls.plot(ω_vec/(2*pi), 20*log10.(abs.(bi./ai)), xlabel="Frequency (Hz)", yl
 sys = jls.HarmonicSystem(model, jls.P1.Isrc.ω, 2, determine_jacobian=true)
 
 # Linearised responses are ordered by the jacobian's `vars` ordering — [DC, cos₁, sin₁,
-# cos₂, sin₂] per state — NOT by unknowns(system). The row map gives the bookkeeping:
-jls.linearised_row_map(sys)
+# cos₂, sin₂] per state, states in get_full_equations order — NOT by unknowns(system).
+# get_output handles this; read responses by name rather than by raw row index.
 
 # Pump tone at the MIT example's frequency. Two conventions to mind when comparing:
 # (1) JosephsonCircuits' source `current=Ip` is a one-sided spectral amplitude — physical
