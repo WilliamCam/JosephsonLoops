@@ -19,6 +19,7 @@ ps = Dict(
     jls.C1.C => 100.0e-15,
     jls.J1.C => 1000.0e-15,
     jls.J1.I0 => jls.Φ₀/(2π*1000.0e-12),
+    jls.J1.R => 50e3
     jls.J1.R => 1e12
 )
 
@@ -31,7 +32,6 @@ ps = Dict(
 # Define the sweep range (8 to 10.0 GHz)
 ω_vec = collect(2*pi*(4.5:0.001:5.0)*1e9)
 
-
 sweep_params = delete!(ps, jls.P1.Isrc.ω)
 
 sys = jls.HarmonicSystem(model, jls.P1.Isrc.ω, 2)
@@ -42,6 +42,8 @@ out = prob.result.solution[jls.P1.Isrc.ω]
 
 current = jls.get_output(prob, result, "C1₊i", 1)
 theta_p_mag = jls.get_output(prob, result, "P1₊dθ",  1)
+
+eq = jls.get_harmonic_expression(prob, "C1₊i", 1)
 
 Ii = @. (0.00565e-6 - current)
 Vi = @. (jls.Φ₀ / (2*pi) * real.(theta_p_mag)) 
