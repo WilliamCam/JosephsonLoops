@@ -124,8 +124,8 @@ end
 
 
 function build_jacobians(rotated_system, vars, dvars)
-    print(vars)
-    #TODO check ordering
+    # Columns of J0 follow `vars` and columns of J1 follow `dvars`; harmonic_equation
+    # assembles both in the same order, so column i of J1 is d/d(vars[i]').
     _jac = Symbolics.jacobian(rotated_system, vars)
     jac_0 = Num.((substitute(_jac, Dict(dvars .=> 0))))
     jac_1 = Symbolics.jacobian(rotated_system, dvars)
@@ -140,7 +140,10 @@ function rotate_to_harmonic_frame(M, N, Nt, harmonic_system)
     total_cols = M * Nt
     # Initialize the large block-diagonal matrix
     Γ_total = zeros(Num, total_rows, total_cols)
-    # Generate the single-variable operator (the logic you already have)
+    # Single-variable Fourier projection of the collocation residuals. Rows are
+    # interleaved [DC, cos₁, sin₁, cos₂, sin₂, ...] so that equation rows carry the same
+    # ordering as the `vars` jacobian columns (see linearised_row_map in get_phasor.jl):
+    # one index map then addresses both the perturbation vector and the response vector.
     Γ_single = Matrix{Num}(undef, block_rows, Nt)
     for j in 1:Nt
         # DC Term
@@ -148,8 +151,8 @@ function rotate_to_harmonic_frame(M, N, Nt, harmonic_system)
         # AC Terms
         for n in 1:N
             phase = n * (j - 1) * (2π / Nt)
-            Γ_single[n + 1, j] = Num((2//Nt) * cos(phase))      # Cosine
-            Γ_single[N + 1 + n, j] = Num((2//Nt) * sin(phase))  # Sine
+            Γ_single[2n, j] = Num((2//Nt) * cos(phase))          # Cosine
+            Γ_single[2n + 1, j] = Num((2//Nt) * sin(phase))      # Sine
         end
     end
     # Place the single-variable operator into the block diagonal
@@ -159,7 +162,6 @@ function rotate_to_harmonic_frame(M, N, Nt, harmonic_system)
         Γ_total[row_range, col_range] .= Γ_single
     end
     #ordering should be preserved as equations in colocation.jl are created in this order
-    rotated_system = Γ_total * [equation.lhs for equation in harmonic_system] 
-    rotated_system =  [equation.lhs for equation in harmonic_system]  
+    rotated_system = Γ_total * [equation.lhs for equation in harmonic_system]
     return (rotated_system)
 end

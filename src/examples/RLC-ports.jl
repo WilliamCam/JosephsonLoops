@@ -20,6 +20,7 @@ ps = Dict(
     jls.J1.C => 1000.0e-15,
     jls.J1.I0 => jls.Φ₀/(2π*1000.0e-12),
     jls.J1.R => 50e3
+    jls.J1.R => 1e12
 )
 
 #time domain simulation 
@@ -52,81 +53,68 @@ ai = @. 0.5 * (Vi + Z0 * Ii) / sqrt(Z0)
 bi = @. 0.5 * (Vi - Z0 * Ii) / sqrt(Z0)
 p = jls.plot(ω_vec/(2*pi), 20*log10.(abs.(bi./ai)), xlabel="Frequency (Hz)", ylabel="S11 (dB)", title="RLC S-Parameter", lw=2)
 
-#Performing Linear analysis on system to find small signal gain
+#  Linear (small-signal) analysis around a pump tone — mirrors the JPA example in MIT's
+#  JosephsonCircuits.jl (port ∥ 50Ω, series Cc=100fF, junction Lj=1nH ∥ Cj=1000fF).
 sys = jls.HarmonicSystem(model, jls.P1.Isrc.ω, 2, determine_jacobian=true)
-resp = zeros(size(sys.jacobian[1],1))
-resp[12] = 1e-11
-lin_prob = jls.HarmonicProblem(sys, ω_vec, sweep_params, linear_response = (2*pi*4.7501*1e9, resp))
-# Solve
-@time sweep_res = jls.solve!(lin_prob)
-out = lin_prob.result.solution[jls.P1.Isrc.ω]
-using Plots
 
-current_re = @. (out[3,:]*ω_vec + out[8,:]*ω_vec) / (-3.0385348964360245e15*50.0)
-current_im = @. 0.00565e-6 + (-out[2,:]*ω_vec - out[7,:]*ω_vec) / (-3.0385348964360245e15*50.0)
+# Linearised responses are ordered by the jacobian's `vars` ordering — [DC, cos₁, sin₁,
+# cos₂, sin₂] per state — NOT by unknowns(system). The row map gives the bookkeeping:
+jls.linearised_row_map(sys)
 
-
-current = sqrt.(out[12,:].^2 + out[13,:].^2)/jls.Φ₀^2
-voltage = sqrt.(out[17,:].^2 + out[18,:].^2)/jls.Φ₀^2
-
-Ii = -sqrt(1e-9^2+1e-9^2)
-Vi = jls.Φ₀/(2*pi) * (voltage)
-Z0=50
-ai = @. 0.5 * (Vi + Z0 * Ii) / sqrt(Z0)
-bi = @. 0.5 * (Vi - Z0 * Ii) / sqrt(Z0)
-p = jls.plot(ω_vec/(2*pi), 20*log10.(abs.(bi./ai)), xlabel="Frequency (Hz)", ylabel="S11 (dB)", title="RLC S-Parameter", lw=2)
-
-
-#  JPA linearization (matches MIT JosephsonCircuits.jl JPA example)
-# Pump tone (MIT example)
+# Pump tone at the MIT example's frequency. Two conventions to mind when comparing:
+# (1) JosephsonCircuits' source `current=Ip` is a one-sided spectral amplitude — physical
+#     peak current is 2·Ip, so their 5.65 nA ≡ 11.3 nA here;
+# (2) the MIT junction is lossless (Lj ∥ Cj) while our RCSJ junction carries the 10 kΩ
+#     shunt, raising the critical pump further. Drive at 15 nA, where the linearised
+#     gain peaks (+13.3 dB at the degenerate point).
 ωp = 2*pi*4.75001e9
-Ip = 0.00565e-6
-jpa_params[jls.P1.Isrc.I] = Ip
+jpa_params = copy(sweep_params)
+jpa_params[jls.P1.Isrc.I] = 11.3e-9
 
-# HarmonicSystem with linearization data; tearing=false keeps all 12 vars as unknowns
-@time h_sys_lin = jls.HarmonicSystem(model, jls.P1.Isrc.ω; N=1, linear=true, tearing=false)
+# The whole fix: build the correct input perturbation. source_perturbation_vector locates the
+# source drive (U = −∂F/∂I — rows, quadratures, signs, scalings all automatic) and combines its
+# two quadratures into the complex injection U_cos − i·U_sin, a pure signal sideband (e^{+iΩt}).
+δI = 1.0e-10
+pert = jls.source_perturbation_vector(sys, jls.P1.Isrc.I, jpa_params; amplitude=δI)
 
-# Single-point nonlinear HB at the pump frequency to get the working point
+# Pump working point via downward continuation (5.0 GHz → ωp): the softening junction
+# pulls its resonance toward the pump, so approaching from above lands the driven branch.
+ω_down = collect(range(2*pi*5.0e9, ωp, 120))
+pump_prob = jls.HarmonicProblem(sys, ω_down, jpa_params)
+jls.solve!(pump_prob)
+U₀ = real.(pump_prob.result.solution[jls.P1.Isrc.ω][:, end])
 
-pump_prob = jls.HarmonicProblem(h_sys_lin, jpa_params;
-    sweep_var=jls.P1.Isrc.ω, sweep_vals=[ωp])
-pump_res = jls.solve(pump_prob)
+Ω_vec = collect(2*pi*(4.5:0.001:5.0)*1e9)
+lin_prob = jls.HarmonicProblem(sys, Ω_vec, jpa_params; U₀=U₀, linear_response = (ωp, pert))
+lin_res = jls.solve!(lin_prob)
 
-# U₀: every harmonic coefficient at the pump
-U₀ = Dict{Num, Float64}(v => vals[1] for (v, vals) in pump_res.results)
-
-# Small-signal frequency sweep (4.5–10 GHz)
-Ω_vals = 2*pi*(4.5:0.001:10.0)*1e9
-
-# Linearize: unit kick on the port-current cos coefficient at the fundamental
-lin_prob = jls.LinearizedProblem(h_sys_lin, jpa_params, ωp, U₀, Ω_vals;
-    perturb_var="P1₊i", perturb_order=1, perturb_component=:Cos, perturb_amplitude=1.0)
-lin_result = jls.solve(lin_prob)
-
-# S11 from the small-signal current/phase response (mirrors the nonlinear S11 above)
-P1i_A  = h_sys_lin.variable_map[("P1₊i",  1, :Cos)]
-P1i_B  = h_sys_lin.variable_map[("P1₊i",  1, :Sin)]
-P1dθ_A = h_sys_lin.variable_map[("P1₊dθ", 1, :Cos)]
-P1dθ_B = h_sys_lin.variable_map[("P1₊dθ", 1, :Sin)]
-current_p = lin_result.results[P1i_A]  .+ 1im .* lin_result.results[P1i_B]
-theta_p   = lin_result.results[P1dθ_A] .+ 1im .* lin_result.results[P1dθ_B]
-
-Ii = @. (1.0 - current_p)
-Vi = @. (jls.Φ₀ / (2*pi) * theta_p)
+# Upper-sideband port-voltage response (V = Φ₀/2π · dθ) to the unit signal drive.
 Z0 = 50.0
-ai = @. 0.5 * (Vi + Z0 * Ii) / sqrt(Z0)
-bi = @. 0.5 * (Vi - Z0 * Ii) / sqrt(Z0)
-jls.plot(Ω_vals/(2*pi*1e9), 20*log10.(abs.(bi./ai)),
-    xlabel="Frequency (GHz)", ylabel="S11 (dB)",
-    title="JPA linearized S11 (LinearizedProblem)", lw=4, label="JosephsonLoops")
+V_sig = (jls.Φ₀ / (2*pi)) .* jls.get_output(sys, lin_prob, lin_res, "P1₊dθ", 1)
 
+# Phase-PRESERVING reflection at the Norton port (Isrc ∥ Rsrc ∥ DUT share one node pair, so
+# V_DUT = V_port): the unit signal sideband carries incident current 2δI, so S(0,0) =
+# V_sig/(Z0·δI) − 1. This is COMPLEX — it keeps the reflection phase — and is the signal-to-
+# signal scattering that JosephsonCircuits.jl reports. |S(0,0)| ≈ +13.3 dB at the degenerate
+# point; with the pump off it collapses to the ordinary linear S11. (A single real-quadrature
+# drive would instead read the amplified/squeezed quadrature of the phase-sensitive amplifier.)
+S11 = @. V_sig / (Z0 * δI) - 1
 
-arr1 = [1, 2, 3]
-arr2 = [:a, :b]
+p_mag = jls.plot(Ω_vec/(2*pi*1e9), 20*log10.(abs.(S11)),
+    xlabel="Frequency (GHz)", ylabel="|S₁₁| (dB)",
+    title="JPA gain — JosephsonLoops vs JosephsonCircuits.jl",
+    lw=2, label="JosephsonLoops", legend=:topright)
 
-# Creates an iterator of tuples
-combinations = Iterators.product(arr1, arr2)
-
-for (x, y) in combinations
-    println("Combination: $x, $y")
+# Overlay JosephsonCircuits.jl. First generate the CSV once, from the MIT project:
+#   cd ../JosephsonCircuits-MIT/JosephsonCircuits.jl
+#   julia --project=. ../../JosephsonLoops/mit_jpa_export.jl
+using DelimitedFiles
+mit_csv = joinpath(@__DIR__, "..", "..", "mit_jpa.csv")
+if isfile(mit_csv)
+    mit = readdlm(mit_csv, ',')
+    jls.plot!(p_mag, mit[:, 1], mit[:, 2], lw=2, ls=:dash, label="JosephsonCircuits.jl")
+else
+    @warn "mit_jpa.csv not found — run mit_jpa_export.jl in the JosephsonCircuits project first."
 end
+p_mag
+
