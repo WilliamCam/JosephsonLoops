@@ -81,6 +81,8 @@ end
 # combining the two quadratures here is the whole fix. Passively (no pump) U reduces to the
 # ordinary linear drive and S(0,0) to the ordinary linear S11. `parameters` supplies numeric
 # values for any parameter that multiplies the source term.
+
+#jacobian of the system  does this already 
 function source_perturbation_vector(h_sys::HarmonicSystem, source_param::Num, parameters::Dict; amplitude::Float64 = 1.0)
     t = Num(ModelingToolkit.get_iv(h_sys.time_domain_system))
     eqs, _states = get_full_equations(h_sys.time_domain_system, t)
@@ -96,7 +98,7 @@ function source_perturbation_vector(h_sys::HarmonicSystem, source_param::Num, pa
         zero_harmonics[Symbolics.unwrap(cos(Num(n) * ω * t))] = 0.0
         zero_harmonics[Symbolics.unwrap(sin(Num(n) * ω * t))] = 0.0
     end
-
+                                                                    
     found = false
     for (k, eq) in enumerate(eqs)
         profile = Symbolics.derivative(eq.lhs - eq.rhs, source_param)

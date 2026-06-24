@@ -100,6 +100,19 @@ S11 = @. V_sig / (Z0 * δI) - 1
 
 p_mag = jls.plot(Ω_vec/(2*pi*1e9), 20*log10.(abs.(S11)),
     xlabel="Frequency (GHz)", ylabel="|S₁₁| (dB)",
-    title=" S₁₁ — magnitude (matches JosephsonCircuits.jl)",
-    lw=2, legend=false)
+    title="JPA gain — JosephsonLoops vs JosephsonCircuits.jl",
+    lw=2, label="JosephsonLoops", legend=:topright)
+
+# Overlay JosephsonCircuits.jl. First generate the CSV once, from the MIT project:
+#   cd ../JosephsonCircuits-MIT/JosephsonCircuits.jl
+#   julia --project=. ../../JosephsonLoops/mit_jpa_export.jl
+using DelimitedFiles
+mit_csv = joinpath(@__DIR__, "..", "..", "mit_jpa.csv")
+if isfile(mit_csv)
+    mit = readdlm(mit_csv, ',')
+    jls.plot!(p_mag, mit[:, 1], mit[:, 2], lw=2, ls=:dash, label="JosephsonCircuits.jl")
+else
+    @warn "mit_jpa.csv not found — run mit_jpa_export.jl in the JosephsonCircuits project first."
+end
+p_mag
 
