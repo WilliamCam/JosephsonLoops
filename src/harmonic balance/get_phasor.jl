@@ -34,44 +34,6 @@ function get_output(h_sys::HarmonicSystem, lin_prob::LinearisedProblem, result::
     return apply_harmonic_expression(h_sys, lin_prob, result, expression)
 end
 
-
-function perturbation_response(h_sys::HarmonicSystem, source_param::Num, parameters::Dict; amplitude::Float64 = 1.0)
-    t = Num(ModelingToolkit.get_iv(h_sys.time_domain_system))
-    eqs, _states = get_full_equations(h_sys.time_domain_system, t)
-    N, ω = h_sys.N, h_sys.ω
-    Nt = 2N + 1
-    D = zeros(ComplexF64, length(eqs) * Nt)        # physical (real, single-quadrature) drive
-
-    fixed_params = copy(parameters)
-    delete!(fixed_params, ω)
-    system_response_symbolic = Symbolics.jacobian([eq.lhs - eq.rhs for eq in eqs], [source_param])
-    system_response = Symbolics.substitute(system_response_symbolic, fixed_params)
-    @assert any(x -> !isequal(x, Num(0)), system_response) "Parameter $source_param not found in time domain system"  
-
-    zero_harmonics = Dict{Any, Any}()
-    for n in 1:(2N + 1)
-        zero_harmonics[Symbolics.unwrap(cos(Num(n) * ω * t))] = 0.0
-        zero_harmonics[Symbolics.unwrap(sin(Num(n) * ω * t))] = 0.0
-    end
-
-    for (k, eq) in enumerate(system_response)
-        isequal(Symbolics.simplify(eq), Num(0)) && continue
-        base = (k - 1) * Nt
-        D[base + 1] -= amplitude * Symbolics.substitute(eq, zero_harmonics)
-        for n in 1:N
-            c_cos = Symbolics.coeff(eq, cos(Num(n) * ω * t))
-            c_sin = Symbolics.coeff(eq, sin(Num(n) * ω * t))
-            if c_cos == 0.0 && c_sin == 0.0
-                continue
-            end
-            D[base + 2n + 1] -= amplitude * (c_cos - im * c_sin)
-
-            D[base + 2n] -= amplitude * (c_sin + im * c_cos)
-        end
-    end
-    return D
-end
-
 #  Harmonic expressions
 
 # Symbolic (cos, sin) Fourier coefficients of `var_name` at the requested order. A state's

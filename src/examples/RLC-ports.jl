@@ -56,28 +56,13 @@ p = jls.plot(ω_vec/(2*pi), 20*log10.(abs.(bi./ai)), xlabel="Frequency (Hz)", yl
 #  JosephsonCircuits.jl (port ∥ 50Ω, series Cc=100fF, junction Lj=1nH ∥ Cj=1000fF).
 sys = jls.HarmonicSystem(model, jls.P1.Isrc.ω, 2, determine_jacobian=true)
 
-# Linearised responses are ordered by the jacobian's `vars` ordering — [DC, cos₁, sin₁,
-# cos₂, sin₂] per state, states in get_full_equations order — NOT by unknowns(system).
-# get_output handles this; read responses by name rather than by raw row index.
-
-# Pump tone at the MIT example's frequency. Two conventions to mind when comparing:
-# (1) JosephsonCircuits' source `current=Ip` is a one-sided spectral amplitude — physical
-#     peak current is 2·Ip, so their 5.65 nA ≡ 11.3 nA here;
-# (2) the MIT junction is lossless (Lj ∥ Cj) while our RCSJ junction carries the 10 kΩ
-#     shunt, raising the critical pump further. Drive at 15 nA, where the linearised
-#     gain peaks (+13.3 dB at the degenerate point).
 ωp = 2*pi*4.75001e9
+δI = 11.3e-9
+
 jpa_params = copy(sweep_params)
-jpa_params[jls.P1.Isrc.I] = 11.3e-9
+jpa_params[jls.P1.Isrc.I] = δI
 
-
-δI = 1.0e-10
-pert = jls.source_perturbation_vector(sys, jls.P1.Isrc.I, jpa_params; amplitude=δI)
-
-
-pert = jls.perturbation_response(sys, jls.P1.Isrc.I, jpa_params; amplitude=δI)
-
-jpa_params
+pert = jls.perturbation_response(sys, jls.P1.Isrc.I, jpa_params)
 
 ω_down = collect(range(2*pi*5.0e9, ωp, 120))
 pump_prob = jls.HarmonicProblem(sys, ω_down, jpa_params)
@@ -97,6 +82,8 @@ p_mag = jls.plot(Ω_vec/(2*pi*1e9), 20*log10.(abs.(S11)),
     xlabel="Frequency (GHz)", ylabel="|S₁₁| (dB)",
     title="JPA gain — JosephsonLoops vs JosephsonCircuits.jl",
     lw=2, label="JosephsonLoops", legend=:topright)
+
+
 
 # Overlay JosephsonCircuits.jl. First generate the CSV once, from the MIT project:
 #   cd ../JosephsonCircuits-MIT/JosephsonCircuits.jl
