@@ -11,7 +11,7 @@ coupling = [(1,2)]
 ext_flux = [true, false, false, false]
 circuit = jls.process_netlist(loops, mutual_coupling = coupling, ext_flux = ext_flux)
 
-model, x = jls.build_circuit(circuit)  
+model, u0, guesses = jls.build_circuit(circuit)  
 
 I₀ = 1.0e-6
 R₀ = 5.0
@@ -19,7 +19,7 @@ R₀ = 5.0
 
 βc  = 2*pi/Φ₀ * I₀ * R₀^2
 βL = 2*pi/Φ₀ * I₀
-fdrive = 100e6
+fdrive = 2.0e9
 
 ps = [
     jls.I1.ω => 2*pi*fdrive
@@ -31,15 +31,17 @@ ps = [
     jls.C1.C => 2.0/βc
     jls.L1.L => 2.0/βc
     jls.L2.L => 100.0/βL
-    jls.M12.L => 8.0/βL
-    jls.Φₑ1.Φₑ => 0.5
+    jls.M12.L => 2.0/βL
+    jls.Φₑ1.Φₑ => 0.4*Φ₀
 
 ]
 
-tspan = (0.0, 1e-6)
-saveat = LinRange(tspan[2]/10.0, tspan[2], 10000)
-sol = jls.tsolve(model, u0, tspan, ps; saveat = saveat)
-jls.tplot(sol, jls.R1, units="volts")
+u0 = delete!(Dict(guesses), jls.M12.i)
+
+tspan = (0.0, 5e-9)
+saveat = LinRange(tspan[2]/10.0, tspan[2], 10000000)
+sol = jls.tsolve(model, u0, ps, tspan, guesses=guesses)
+jls.plot(sol[jls.R1.i])
 
 ## Parameter Sweeps
 using Plots
