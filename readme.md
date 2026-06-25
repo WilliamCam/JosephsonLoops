@@ -1,0 +1,1 @@
+JosephsonLoops.jl is an open source package that solves lumped element circuit models contain josephson junction elements in the time and frequency domains using harmonic balance

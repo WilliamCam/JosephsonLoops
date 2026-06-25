@@ -34,104 +34,42 @@ function get_output(h_sys::HarmonicSystem, lin_prob::LinearisedProblem, result::
     return apply_harmonic_expression(h_sys, lin_prob, result, expression)
 end
 
-#  Linearised-problem indexing
-#
-# The linearised solve works in the coefficient ordering of the jacobians, NOT in
-# unknowns(system) order: build_jacobians differentiates with respect to `vars`, which
-# harmonic_equation assembles state by state as [DC, cos₁, sin₁, cos₂, sin₂, ...]. Rows of
-# the rotated equations carry the same interleaved ordering (rotate_to_harmonic_frame), so
-# the maps below address both the perturbation vector and the response array.
 
-# The coefficient symbols in jacobian-column order — `h_sys.jacobian_vars`, the `vars`
-# vector build_jacobians differentiated against, which the linearised response inherits.
-# This is the single source of truth; linearised_row_map derives from it.
-function linearised_vars(h_sys::HarmonicSystem)
-    isnothing(h_sys.jacobian_vars) &&
-        error("linearised_vars requires a HarmonicSystem built with determine_jacobian=true")
-    return h_sys.jacobian_vars
-end
-
-# (state name, order, :Cos/:Sin) -> row in the linearised perturbation/response vectors.
-# Each column symbol in jacobian_vars is reverse-looked-up in variable_map, so the stored
-# vars vector alone fixes every index — no separate layout arithmetic to keep in sync.
-function linearised_row_map(h_sys::HarmonicSystem)
-    sym_to_key = Dict(Symbolics.unwrap(v) => k for (k, v) in h_sys.variable_map)
-    rows = Dict{Tuple{String, Int, Symbol}, Int}()
-    for (idx, var) in enumerate(linearised_vars(h_sys))
-        key = get(sym_to_key, Symbolics.unwrap(var), nothing)
-        key === nothing && error("Coefficient $(var) at column $idx is not in variable_map")
-        rows[key] = idx
-    end
-    return rows
-end
-
-
-# Pure upper-sideband ("signal") injection vector for a small test tone on a sinusoidal source
-# parameter (e.g. P1₊Isrc₊I). The physical drive D = −∂F/∂param·amplitude is read straight from
-# the time-domain equations — projecting each equation's ∂(residual)/∂param onto the harmonic
-# basis fixes the equation rows, quadratures, signs and scalings (e.g. the 2π/(Φ₀C) of a
-# junction) automatically. That single real quadrature is then combined with its 90°-rotated
-# partner (cos ↔ sin per harmonic) into the COMPLEX injection U = U_cos − i·U_sin, the
-# harmonic-frame image of a single tone e^{+iΩt}: a pure signal sideband with no idler.
-#
-# Driving U and reading the upper-sideband response gives the phase-PRESERVING reflection
-# S(0,0) directly (complex, so the phase survives), the signal-to-signal scattering that nodal
-# HB codes (JosephsonCircuits.jl) report. A real single-quadrature drive would instead see only
-# the amplified/squeezed quadrature of a degenerate (phase-sensitive) parametric amplifier;
-# combining the two quadratures here is the whole fix. Passively (no pump) U reduces to the
-# ordinary linear drive and S(0,0) to the ordinary linear S11. `parameters` supplies numeric
-# values for any parameter that multiplies the source term.
-
-#jacobian of the system  does this already 
-function source_perturbation_vector(h_sys::HarmonicSystem, source_param::Num, parameters::Dict; amplitude::Float64 = 1.0)
+function perturbation_response(h_sys::HarmonicSystem, source_param::Num, parameters::Dict; amplitude::Float64 = 1.0)
     t = Num(ModelingToolkit.get_iv(h_sys.time_domain_system))
     eqs, _states = get_full_equations(h_sys.time_domain_system, t)
     N, ω = h_sys.N, h_sys.ω
-    block = 2N + 1
-    D = zeros(Float64, length(eqs) * block)        # physical (real, single-quadrature) drive
+    Nt = 2N + 1
+    D = zeros(ComplexF64, length(eqs) * Nt)        # physical (real, single-quadrature) drive
 
-    # numeric parameter values, never the swept ω (it is part of the harmonic basis)
-    fixed_params = Dict(k => v for (k, v) in parameters if !isequal(Num(k), ω))
-    as_number(x) = Float64(Symbolics.value(Symbolics.simplify(x)))
+    fixed_params = copy(parameters)
+    delete!(fixed_params, ω)
+    system_response_symbolic = Symbolics.jacobian([eq.lhs - eq.rhs for eq in eqs], [source_param])
+    system_response = Symbolics.substitute(system_response_symbolic, fixed_params)
+    @assert any(x -> !isequal(x, Num(0)), system_response) "Parameter $source_param not found in time domain system"  
+
     zero_harmonics = Dict{Any, Any}()
     for n in 1:(2N + 1)
         zero_harmonics[Symbolics.unwrap(cos(Num(n) * ω * t))] = 0.0
         zero_harmonics[Symbolics.unwrap(sin(Num(n) * ω * t))] = 0.0
     end
-                                                                    
-    found = false
-    for (k, eq) in enumerate(eqs)
-        profile = Symbolics.derivative(eq.lhs - eq.rhs, source_param)
-        profile = Symbolics.expand(Symbolics.substitute(profile, fixed_params))
-        isequal(Symbolics.simplify(profile), Num(0)) && continue
-        found = true
-        base = (k - 1) * block
-        D[base + 1] -= amplitude * as_number(Symbolics.substitute(profile, zero_harmonics))
-        for n in 1:N
-            D[base + 2n]     -= amplitude * as_number(Symbolics.coeff(profile, cos(Num(n) * ω * t)))
-            D[base + 2n + 1] -= amplitude * as_number(Symbolics.coeff(profile, sin(Num(n) * ω * t)))
-        end
-    end
-    found || error("Parameter $source_param does not appear in any time-domain equation")
 
-    # Combine into the pure upper sideband U = U_cos − i·U_sin. U_sin is the physical drive D;
-    # U_cos is D rotated 90° in the harmonic frame (cos ↔ sin per harmonic). Building both from
-    # the same projection keeps it correct for any source phase, and reduces to D passively.
-    rows = linearised_row_map(h_sys)
-    inv_rows = Dict(v => key for (key, v) in rows)
-    U = ComplexF64.(-im .* D)                       # −i·U_sin
-    for (row, val) in enumerate(D)
-        val == 0 && continue
-        name, order, comp = inv_rows[row]
-        if order == 0                               # DC term has no sideband partner
-            U[row] += val
-        elseif comp == :Cos
-            U[rows[(name, order, :Sin)]] += val     # rotate cos → sin
-        else
-            U[rows[(name, order, :Cos)]] += val     # rotate sin → cos
+    for (k, eq) in enumerate(system_response)
+        isequal(Symbolics.simplify(eq), Num(0)) && continue
+        base = (k - 1) * Nt
+        D[base + 1] -= amplitude * Symbolics.substitute(eq, zero_harmonics)
+        for n in 1:N
+            c_cos = Symbolics.coeff(eq, cos(Num(n) * ω * t))
+            c_sin = Symbolics.coeff(eq, sin(Num(n) * ω * t))
+            if c_cos == 0.0 && c_sin == 0.0
+                continue
+            end
+            D[base + 2n + 1] -= amplitude * (c_cos - im * c_sin)
+
+            D[base + 2n] -= amplitude * (c_sin + im * c_cos)
         end
     end
-    return U
+    return D
 end
 
 #  Harmonic expressions

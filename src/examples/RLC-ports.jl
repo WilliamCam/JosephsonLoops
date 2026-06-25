@@ -58,7 +58,7 @@ sys = jls.HarmonicSystem(model, jls.P1.Isrc.ω, 2, determine_jacobian=true)
 
 # Linearised responses are ordered by the jacobian's `vars` ordering — [DC, cos₁, sin₁,
 # cos₂, sin₂] per state — NOT by unknowns(system). The row map gives the bookkeeping:
-jls.linearised_row_map(sys)
+out = jls.linearised_row_map(sys)
 
 # Pump tone at the MIT example's frequency. Two conventions to mind when comparing:
 # (1) JosephsonCircuits' source `current=Ip` is a one-sided spectral amplitude — physical
@@ -70,14 +70,15 @@ jls.linearised_row_map(sys)
 jpa_params = copy(sweep_params)
 jpa_params[jls.P1.Isrc.I] = 11.3e-9
 
-# The whole fix: build the correct input perturbation. source_perturbation_vector locates the
-# source drive (U = −∂F/∂I — rows, quadratures, signs, scalings all automatic) and combines its
-# two quadratures into the complex injection U_cos − i·U_sin, a pure signal sideband (e^{+iΩt}).
+
 δI = 1.0e-10
 pert = jls.source_perturbation_vector(sys, jls.P1.Isrc.I, jpa_params; amplitude=δI)
 
-# Pump working point via downward continuation (5.0 GHz → ωp): the softening junction
-# pulls its resonance toward the pump, so approaching from above lands the driven branch.
+
+pert = jls.perturbation_response(sys, jls.P1.Isrc.I, jpa_params; amplitude=δI)
+
+jpa_params
+
 ω_down = collect(range(2*pi*5.0e9, ωp, 120))
 pump_prob = jls.HarmonicProblem(sys, ω_down, jpa_params)
 jls.solve!(pump_prob)
@@ -87,16 +88,9 @@ U₀ = real.(pump_prob.result.solution[jls.P1.Isrc.ω][:, end])
 lin_prob = jls.HarmonicProblem(sys, Ω_vec, jpa_params; U₀=U₀, linear_response = (ωp, pert))
 lin_res = jls.solve!(lin_prob)
 
-# Upper-sideband port-voltage response (V = Φ₀/2π · dθ) to the unit signal drive.
 Z0 = 50.0
 V_sig = (jls.Φ₀ / (2*pi)) .* jls.get_output(sys, lin_prob, lin_res, "P1₊dθ", 1)
 
-# Phase-PRESERVING reflection at the Norton port (Isrc ∥ Rsrc ∥ DUT share one node pair, so
-# V_DUT = V_port): the unit signal sideband carries incident current 2δI, so S(0,0) =
-# V_sig/(Z0·δI) − 1. This is COMPLEX — it keeps the reflection phase — and is the signal-to-
-# signal scattering that JosephsonCircuits.jl reports. |S(0,0)| ≈ +13.3 dB at the degenerate
-# point; with the pump off it collapses to the ordinary linear S11. (A single real-quadrature
-# drive would instead read the amplified/squeezed quadrature of the phase-sensitive amplifier.)
 S11 = @. V_sig / (Z0 * δI) - 1
 
 p_mag = jls.plot(Ω_vec/(2*pi*1e9), 20*log10.(abs.(S11)),
@@ -115,5 +109,5 @@ if isfile(mit_csv)
 else
     @warn "mit_jpa.csv not found — run mit_jpa_export.jl in the JosephsonCircuits project first."
 end
-p_mag
+
 
