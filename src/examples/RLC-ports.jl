@@ -13,7 +13,7 @@ loops = [
 @time circuit = jls.process_netlist(loops)
 @time model, u0, guesses = jls.build_circuit(circuit)
 I₀ = jls.Φ₀/(2π*1000.0e-12)
-R₀ = 15e3
+R₀ = 100e3
 ωc = R₀*I₀/(jls.Φ₀/2π)
 
 ps = Dict(
@@ -32,7 +32,7 @@ p1 = jls.plot(tsol[jls.C1.i][end-400:end].*I₀, title = "Transient Time Plot", 
 
 #hb Setup
 # Define the sweep range (8 to 10.0 GHz)
-ω_vec = collect(2*pi*(4.5:0.001:5.0)*1e9)
+ω_vec = collect(2*pi*(4.5:0.001:5.0)*1e9/ωc)
 
 sweep_params = delete!(ps, jls.P1.Isrc.ω)
 
@@ -43,12 +43,12 @@ result = jls.solve!(prob)
 out = prob.result.solution[jls.P1.Isrc.ω]
 
 current = jls.get_output(prob, result, "C1₊i", 1)
-theta_p_mag = jls.get_output(prob, result, "P1₊dθ",  1)
+theta_p_mag = jls.get_output(prob, result, "P1₊dφ",  1)
 
 eq = jls.get_harmonic_expression(prob, "C1₊i", 1)
 
-Ii = @. (0.00565e-6 - current)
-Vi = @. (jls.Φ₀ / (2*pi) * real.(theta_p_mag)) 
+Ii = @. (0.00565e-6/I₀ - current)*I₀
+Vi = @. real.(theta_p_mag)*R₀*I₀
 # Calculate Power Waves (a = incident, b = reflected)
 Z0 = 50.0
 ai = @. 0.5 * (Vi + Z0 * Ii) / sqrt(Z0)
