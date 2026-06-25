@@ -44,7 +44,7 @@ j  = 70
 
 # Probe: unit kick (1e-3) on x's sin@1 equation row. perturbation_vector looks the row up
 # from the (variable, order, component) triple; the row ordering is [DC, cos₁, sin₁, ...]
-# per state (see linearised_row_map).
+# per state (the jacobian-column ordering, [DC, cos₁, sin₁, ...]).
 perturbation = jls.perturbation_vector(h_sys, "x", 1, :Sin; amplitude=1.0e-3)
 
 # Warm-start the working-point solve from the j-th sweep point (lands on the high branch)

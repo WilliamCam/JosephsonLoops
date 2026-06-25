@@ -125,7 +125,24 @@ function apply_harmonic_expression(h_sys::HarmonicSystem, lin_prob::LinearisedPr
 
     solution = result.solution[ω]
 
-    f_re, f_im = compile_phasor(expression, Symbolics.unwrap.(linearised_vars(h_sys)),
+    # Rebuild the response-row ordering (= jacobian columns): per state in get_full_equations
+    # order, the coefficients [DC, cos₁, sin₁, cos₂, sin₂, ...] pulled from variable_map. This
+    # matches how harmonic_equation assembled `vars`, so the compiled phasor reads each
+    # coefficient from the correct response row.
+    tvar = Num(ModelingToolkit.get_iv(h_sys.time_domain_system))
+    _, states = get_full_equations(h_sys.time_domain_system, tvar)
+    vmap = h_sys.variable_map
+    vars = Num[]
+    for s in states
+        name = strip_t(s)
+        push!(vars, vmap[(name, 0, :Cos)])
+        for n in 1:h_sys.N
+            push!(vars, vmap[(name, n, :Cos)])
+            push!(vars, vmap[(name, n, :Sin)])
+        end
+    end
+
+    f_re, f_im = compile_phasor(expression, Symbolics.unwrap.(vars),
                                 lin_prob.parameters, h_sys.system, ω)
 
     return map(axes(solution, 2)) do i

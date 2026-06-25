@@ -142,7 +142,7 @@ function rotate_to_harmonic_frame(M, N, Nt, harmonic_system)
     Γ_total = zeros(Num, total_rows, total_cols)
     # Single-variable Fourier projection of the collocation residuals. Rows are
     # interleaved [DC, cos₁, sin₁, cos₂, sin₂, ...] so that equation rows carry the same
-    # ordering as the `vars` jacobian columns (see linearised_row_map in get_phasor.jl):
+    # ordering as the `vars` jacobian columns ([DC, cos₁, sin₁, ...] per state):
     # one index map then addresses both the perturbation vector and the response vector.
     Γ_single = Matrix{Num}(undef, block_rows, Nt)
     for j in 1:Nt

@@ -106,6 +106,3 @@ p_start = [
     jls.M12.sys.L => 8.0/βL
     jls.loop1.sys.Φₑ => 0.5*Φ₀]
 u0_guess = Dict(unknowns(sys) .=> 0.0)
-plot_var = ns.E[1] + sqrt(ns.E[3]^2+ns.F[1]^2)
-
-
