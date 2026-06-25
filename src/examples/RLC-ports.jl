@@ -23,9 +23,9 @@ ps = Dict(
 )
 
 #time domain simulation 
-#tspan = (0.0, 1e-6)
-#tsol = jls.tsolve(model, guesses, ps, tspan; guesses=guesses)
-#p1 = jls.plot(tsol[jls.C1.i][end-400:end], title = "Transient Time Plot", xlabel = "t", ylabel = "I_C1")
+tspan = (0.0, 1e-6)
+tsol = @btime jls.tsolve(model, guesses, ps, tspan; guesses=guesses)
+p1 = jls.plot(tsol[jls.C1.i][end-400:end], title = "Transient Time Plot", xlabel = "t", ylabel = "I_C1")
 
 #hb Setup
 # Define the sweep range (8 to 10.0 GHz)

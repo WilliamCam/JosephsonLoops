@@ -36,9 +36,6 @@ end
 
 #  Harmonic expressions
 
-# Symbolic (cos, sin) Fourier coefficients of `var_name` at the requested order. A state's
-# coefficients live in the variable_map; anything else (an observed quantity such as a
-# branch current) is rebuilt from the observed equations.
 function get_harmonic_expression(h_sys::HarmonicSystem, var_name::String, order::Int)
     variable_map = h_sys.variable_map
     if order == 0
