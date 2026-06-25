@@ -4,44 +4,42 @@ const jls = JosephsonLoops
 loops = [
 ["J1","L1"],
 ["L2","C1"],
-["C1","R1"],
-["R1","I1"]]
+["C1","P1"]
+]
 
 coupling = [(1,2)]
-ext_flux = [true, false, false, false]
+ext_flux = [true, false, false]
 circuit = jls.process_netlist(loops, mutual_coupling = coupling, ext_flux = ext_flux)
 
 model, u0, guesses = jls.build_circuit(circuit)  
 
-I₀ = 1.0e-6
-R₀ = 5.0
+I₀ = 1.0e-7
+R₀ = 1.0
 Φ₀ = jls.Φ₀
-
-βc  = 2*pi/Φ₀ * I₀ * R₀^2
-βL = 2*pi/Φ₀ * I₀
-fdrive = 2.0e9
+ωc = R₀*I₀/(jls.Φ₀/2π)
+fdrive = 1e9
 
 ps = [
-    jls.I1.ω => 2*pi*fdrive
-    jls.I1.I => 1.0*I₀
-    jls.J1.I0 => I₀
-    jls.J1.R => R₀
-    jls.J1.C => 0.01/βc
-    jls.R1.R => 50.0
-    jls.C1.C => 2.0/βc
-    jls.L1.L => 2.0/βc
-    jls.L2.L => 100.0/βL
-    jls.M12.L => 2.0/βL
-    jls.Φₑ1.Φₑ => 0.4*Φ₀
+    jls.P1.Isrc.ω => 2*pi*fdrive/ωc,
+    jls.P1.Isrc.I => 1.0,
+    jls.J1.r => 1.0,
+    jls.J1.βc => 0.01*R₀*ωc,
+    jls.P1.Rsrc.r => 50.0/R₀,
+    jls.C1.βc => 2.0*R₀*ωc,
+    jls.L1.βL => 2.0*I₀/(jls.Φ₀/2π),
+    jls.L2.βL => 100.0*I₀/(jls.Φ₀/2π),
+    jls.M12.βL => 8.0*I₀/(jls.Φ₀/2π),
+    jls.Φₑ1.Φₑ => 0.0
 
 ]
 
 u0 = delete!(Dict(guesses), jls.M12.i)
 
-tspan = (0.0, 5e-9)
-saveat = LinRange(tspan[2]/10.0, tspan[2], 10000000)
-sol = jls.tsolve(model, u0, ps, tspan, guesses=guesses)
-jls.plot(sol[jls.R1.i])
+tspan = (0.0, 5.0e-9).*ωc
+saveat = LinRange(tspan[2]/10.0, tspan[2], 10000)
+sol = jls.tsolve(model, guesses, ps, tspan, guesses=guesses, saveat=saveat)
+using ModelingToolkit
+jls.plot(sol[jls.P1.i])
 
 ## Parameter Sweeps
 using Plots
