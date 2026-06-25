@@ -12,20 +12,23 @@ loops = [
 
 @time circuit = jls.process_netlist(loops)
 @time model, u0, guesses = jls.build_circuit(circuit)
+I₀ = jls.Φ₀/(2π*1000.0e-12)
+R₀ = 15e3
+ωc = R₀*I₀/(jls.Φ₀/2π)
+
 ps = Dict(
-    jls.P1.Isrc.ω => 100e6*2*pi,
-    jls.P1.Isrc.I => 0.00565e-6,
-    jls.P1.Rsrc.R => 50.0,
-    jls.C1.C => 100.0e-15,
-    jls.J1.C => 1000.0e-15,
-    jls.J1.I0 => jls.Φ₀/(2π*1000.0e-12),
-    jls.J1.R => 1e12
+    jls.P1.Isrc.ω => 100e6*2*pi/ωc,
+    jls.P1.Isrc.I => 0.00565e-6/I₀,
+    jls.P1.Rsrc.r => 50.0/R₀,
+    jls.C1.βc => 100.0e-15*R₀*ωc,
+    jls.J1.βc => 1000.0e-15*R₀*ωc,
+    jls.J1.r => 1.0
 )
 
 #time domain simulation 
-#tspan = (0.0, 1e-6)
-#tsol = jls.tsolve(model, guesses, ps, tspan; guesses=guesses)
-#p1 = jls.plot(tsol[jls.C1.i][end-400:end], title = "Transient Time Plot", xlabel = "t", ylabel = "I_C1")
+tspan = (0.0, 1e-6).*ωc
+tsol = jls.tsolve(model, guesses, ps, tspan; guesses=guesses)
+p1 = jls.plot(tsol[jls.C1.i][end-400:end].*I₀, title = "Transient Time Plot", xlabel = "t", ylabel = "I_C1")
 
 #hb Setup
 # Define the sweep range (8 to 10.0 GHz)
