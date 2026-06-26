@@ -15,7 +15,7 @@ loops = [
 ps = Dict(
     jls.P1.Isrc.ω => 100e6*2*pi,
     jls.P1.Isrc.I => 0.00565e-6,
-    jls.P1.Rsrc.R => 50.0,
+     jls.P1.Rsrc.R => 50.0,
     jls.C1.C => 100.0e-15,
     jls.J1.C => 1000.0e-15,
     jls.J1.I0 => jls.Φ₀/(2π*1000.0e-12),
@@ -39,10 +39,10 @@ prob = jls.HarmonicProblem(sys, ω_vec, sweep_params)
 result = jls.solve!(prob)
 out = prob.result.solution[jls.P1.Isrc.ω]
 
-current = jls.get_output(prob, result, "C1₊i", 1)
-theta_p_mag = jls.get_output(prob, result, "P1₊dθ",  1)
+current = jls.get_output(prob, result, jls.C1.i, 1)
+theta_p_mag = jls.get_output(prob, result, jls.P1.dθ,  1)
 
-eq = jls.get_harmonic_expression(prob, "C1₊i", 1)
+eq = jls.get_harmonic_expression(prob, jls.C1.i, 1)
 
 Ii = @. (0.00565e-6 - current)
 Vi = @. (jls.Φ₀ / (2*pi) * real.(theta_p_mag)) 
@@ -62,7 +62,7 @@ sys = jls.HarmonicSystem(model, jls.P1.Isrc.ω, 2, determine_jacobian=true)
 jpa_params = copy(sweep_params)
 jpa_params[jls.P1.Isrc.I] = δI
 
-pert = jls.perturbation_response(sys, jls.P1.Isrc.I, jpa_params)
+pert = jls.perturbation_response(sys, jls.P1.Isrc.I, jpa_params; amplitude=δI)
 
 ω_down = collect(range(2*pi*5.0e9, ωp, 120))
 pump_prob = jls.HarmonicProblem(sys, ω_down, jpa_params)
@@ -74,7 +74,7 @@ lin_prob = jls.HarmonicProblem(sys, Ω_vec, jpa_params; U₀=U₀, linear_respon
 lin_res = jls.solve!(lin_prob)
 
 Z0 = 50.0
-V_sig = (jls.Φ₀ / (2*pi)) .* jls.get_output(sys, lin_prob, lin_res, "P1₊dθ", 1)
+V_sig = (jls.Φ₀ / (2*pi)) .* jls.get_output(sys, lin_prob, lin_res, jls.P1.dθ, 1)
 
 S11 = @. V_sig / (Z0 * δI) - 1
 
@@ -96,5 +96,7 @@ if isfile(mit_csv)
 else
     @warn "mit_jpa.csv not found — run mit_jpa_export.jl in the JosephsonCircuits project first."
 end
+
+
 
 

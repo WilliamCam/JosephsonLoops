@@ -43,6 +43,7 @@ function harmonic_equation(eqs, states, tvar, wvar, N; jac=false)
     @assert M < 26 "System of equations is too large"
     coeff_labels = 'A':'Z'
     X = Num[]
+    X_dt = Num[]   
     harmonic_system, d_harmonic_system = Equation[], Equation[]
     harmonic_eqs, d_harmonic_eqs = eqs, eqs
     if jac
@@ -50,8 +51,8 @@ function harmonic_equation(eqs, states, tvar, wvar, N; jac=false)
         vars = []
         dyn_subs = Dict{Any, Any}()
     end
-    # loop over each state varibale for multiple harmonic equations
-    variable_map = Dict{Tuple{String, Int, Symbol}, Num}()
+ 
+    variable_map = Dict{Tuple{Any, Int, Symbol}, Num}()
 
     for k in 1:M
         cos_coeff_labels, sin_coeff_labels = Symbol(coeff_labels[2*k-1]), Symbol(coeff_labels[2*k])
@@ -61,13 +62,13 @@ function harmonic_equation(eqs, states, tvar, wvar, N; jac=false)
         # Populate variable map 
         actual_cos = cos_coeffs[1]
         actual_sin = sin_coeffs[1]
-        var_name = replace(string(states[k]), "(t)" => "")
+        state_symbol = Symbolics.unwrap(states[k])   
         #Dc
-        variable_map[(var_name, 0, :Cos)] = actual_cos[1]
+        variable_map[(state_symbol, 0, :Cos)] = actual_cos[1]
         #Ac
         for n in 1:N
-            variable_map[(var_name, n, :Cos)] = actual_cos[n+1]
-            variable_map[(var_name, n, :Sin)] = actual_sin[n]
+            variable_map[(state_symbol, n, :Cos)] = actual_cos[n+1]
+            variable_map[(state_symbol, n, :Sin)] = actual_sin[n]
         end
 
         harmonic_state = harmonic_solution(N, tvar, wvar, actual_cos, actual_sin)
@@ -94,6 +95,7 @@ function harmonic_equation(eqs, states, tvar, wvar, N; jac=false)
         end
         push!(X, harmonic_state)
         dXdt, d2Xdt2 = get_derivatives(harmonic_state, tvar)
+        push!(X_dt, dXdt)
         # if all(only_derivatives(eq, states[k], t) for eq in harmonic_eqs)
         #     problematic_var = states[k]
         #     print("Warning: harmonic variable mapped to first derivative i.e. D($problematic_var) = $harmonic_state")
@@ -130,9 +132,9 @@ function harmonic_equation(eqs, states, tvar, wvar, N; jac=false)
         rotated_system = rotate_to_harmonic_frame(M, N, Nt, d_harmonic_system)
         #TODO: Check orderiing for M>1 larger systems
         J0, J1 = build_jacobians(rotated_system, vars, dvars)
-        return sys, X, variable_map, (J0, J1)
+        return sys, X, variable_map, (J0, J1), X_dt
     else
-        return sys, X, variable_map
+        return sys, X, variable_map, X_dt
     end
 end
 

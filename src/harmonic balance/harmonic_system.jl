@@ -10,7 +10,9 @@ struct HarmonicSystem
     ω::Num
     N::Int
     harmonic_ansatz::Any
-    variable_map::Dict{Tuple{String, Int, Symbol}, Num}
+    harmonic_ansatz_dt::Any   # per-state d/dt of the ansatz, cached from harmonic_equation (reused by reconstruct)
+    full_eqs::Any
+    variable_map::Dict{Tuple{Any, Int, Symbol}, Num}
     jacobian::Union{Tuple{Matrix{Num}, Matrix{Num}},Nothing}
 end
 
@@ -214,14 +216,15 @@ function HarmonicSystem(sys, ωvar::Num, N::Int; tearing::Bool=true, determine_j
     determine_jacobian && (tearing = false)
 
     tvar = Num(ModelingToolkit.get_iv(sys))
-    eqs, states = get_full_equations(sys, tvar)
+    eqs, states, diffvars, diff2vars = get_full_equations(sys, tvar)
+    full_eqs = (; eqs, states, diffvars, diff2vars)   
 
     eqs_arg    = length(states) == 1 ? eqs[1]         : eqs
     states_arg = length(states) == 1 ? Num(states[1]) : states
     if determine_jacobian
-        nonlinear_sys, X, variable_map, jac = harmonic_equation(eqs_arg, states_arg, tvar, ωvar, N; jac=true)
+        nonlinear_sys, X, variable_map, jac, X_dt = harmonic_equation(eqs_arg, states_arg, tvar, ωvar, N; jac=true)
     else
-        nonlinear_sys, X, variable_map = harmonic_equation(eqs_arg, states_arg, tvar, ωvar, N)
+        nonlinear_sys, X, variable_map, X_dt = harmonic_equation(eqs_arg, states_arg, tvar, ωvar, N)
         jac = nothing
     end
     
@@ -239,5 +242,5 @@ function HarmonicSystem(sys, ωvar::Num, N::Int; tearing::Bool=true, determine_j
     @named nonlinear_sys = NonlinearSystem(sys_eqs_built, sys_vars, parameters(sys))
     complete_sys = tearing ? mtkcompile(nonlinear_sys) : complete(nonlinear_sys)
 
-    return HarmonicSystem(complete_sys, sys, ωvar, N, X, variable_map, jac)
+    return HarmonicSystem(complete_sys, sys, ωvar, N, X, X_dt, full_eqs, variable_map, jac)
 end
