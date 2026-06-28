@@ -63,6 +63,15 @@ function get_derivatives(X, t)
     return dXdt, d2Xdt2
 end
 
+function zero_harmonics(N, ω, t)
+    subs = Dict{Any, Any}()
+    for n in 1:(2N + 1)
+        subs[Symbolics.unwrap(cos(Num(n) * ω * t))] = 0.0
+        subs[Symbolics.unwrap(sin(Num(n) * ω * t))] = 0.0
+    end
+    return subs
+end
+
 function get_full_equations(model::ModelingToolkit.System, tvar::Num)
     # copy: unknowns(model)/full_equations(model) return references into the model, and the
     # deleteat! calls below would otherwise mutate it (corrupting it for the next call).
@@ -97,7 +106,7 @@ function get_full_equations(model::ModelingToolkit.System, tvar::Num)
     for i in reverse(remove_idxs)
         deleteat!(states, i)
     end
-    return eqs, states
+    return eqs, states, diffvars, diff2vars
 end
 
 function is_term(set, target_term)
@@ -169,7 +178,7 @@ end
 #Creates system pertubation response in harmonic frame
 function perturbation_response(h_sys::HarmonicSystem, source_param::Num, parameters::Dict; amplitude::Float64 = 1.0)
     t = Num(ModelingToolkit.get_iv(h_sys.time_domain_system))
-    eqs, _states = get_full_equations(h_sys.time_domain_system, t)
+    eqs = h_sys.full_eqs.eqs   # cached at build; avoids recomputing get_full_equations
     N, ω = h_sys.N, h_sys.ω
     Nt = 2N + 1
     U = zeros(ComplexF64, length(eqs) * Nt)        # physical (real, single-quadrature) drive
@@ -178,18 +187,13 @@ function perturbation_response(h_sys::HarmonicSystem, source_param::Num, paramet
     delete!(fixed_params, ω)
     system_response_symbolic = Symbolics.jacobian([eq.lhs - eq.rhs for eq in eqs], [source_param])
     system_response = Symbolics.substitute(system_response_symbolic, fixed_params)
-    @assert any(x -> !isequal(x, Num(0)), system_response) "Parameter $source_param not found in time domain system"  
+    @assert any(x -> !isequal(x, Num(0)), system_response) "Parameter $source_param not found in time domain system"
 
-    zero_harmonics = Dict{Any, Any}()
-    for n in 1:(2N + 1)
-        zero_harmonics[Symbolics.unwrap(cos(Num(n) * ω * t))] = 0.0
-        zero_harmonics[Symbolics.unwrap(sin(Num(n) * ω * t))] = 0.0
-    end
-
+    zero_subs = zero_harmonics(N, ω, t)
     for (k, eq) in enumerate(system_response)
         isequal(Symbolics.simplify(eq), Num(0)) && continue
         base = (k - 1) * Nt
-        U[base + 1] -= amplitude * Symbolics.substitute(eq, zero_harmonics)
+        U[base + 1] -= amplitude * Symbolics.substitute(eq, zero_subs)
         for n in 1:N
             c_cos = Symbolics.coeff(eq, cos(Num(n) * ω * t))
             c_sin = Symbolics.coeff(eq, sin(Num(n) * ω * t))
@@ -197,7 +201,6 @@ function perturbation_response(h_sys::HarmonicSystem, source_param::Num, paramet
                 continue
             end
             U[base + 2n + 1] -= amplitude * (c_cos - im * c_sin)
-
             U[base + 2n] -= amplitude * (c_sin + im * c_cos)
         end
     end
