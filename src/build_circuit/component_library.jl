@@ -109,8 +109,8 @@ end
 @mtkmodel CurrentSource begin
     @extend Branch()
     @parameters begin
-        I=1.0
-        ω=1.0, [tunable=true]
+        I = 1.0
+        ω = 1.0, [tunable=true]
     end
     @equations begin
         i ~ I*sin(ω*t)
@@ -119,8 +119,8 @@ end
 
 @mtkmodel Port begin
     @components begin
-        Rsrc = Resistor()
-        Isrc = CurrentSource()
+        Rₙ = Resistor()
+        source = CurrentSource()
         in = Loop()
         out = Loop()
     end
@@ -130,11 +130,11 @@ end
     end
     @equations begin
         [
-            connect(Isrc.in, Rsrc.in)
-            i ~ Isrc.i - Rsrc.i 
-            dφ ~ D(Rsrc.φ)
-            connect(Rsrc.out, in)
-            connect(Isrc.out, out)
+            connect(source.in, Rₙ.in)
+            i ~ source.i - Rₙ.i 
+            dφ ~ D(Rₙ.φ)
+            connect(Rₙ.out, in)
+            connect(source.out, out)
         ]
     end
 end

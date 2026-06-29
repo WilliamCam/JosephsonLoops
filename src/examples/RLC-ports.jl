@@ -10,19 +10,19 @@ loops = [
     ["P1", "C1", "J1"]
 ]
 
-@time circuit = jls.process_netlist(loops)
-@time model, u0, guesses = jls.build_circuit(circuit)
+circuit = jls.process_netlist(loops)
+model, u0, guesses = jls.build_circuit(circuit)
 I₀ = jls.Φ₀/(2π*1000.0e-12)
 R₀ = 10.0e3
 ωc = R₀*I₀/(jls.Φ₀/2π)
 
 ps = Dict(
-    jls.P1.Isrc.ω => 100e6*2*pi/ωc,
-    jls.P1.Isrc.I => 0.00565e-6/I₀,
-    jls.P1.Rsrc.r => 50.0/R₀,
+    jls.P1.source.ω => 100e6*2*pi/ωc,
+    jls.P1.source.I => 0.00565e-6/I₀,
+    jls.P1.Rₙ.r => 50.0/R₀,
     jls.C1.βc => 100.0e-15*R₀*ωc,
     jls.J1.βc => 1000.0e-15*R₀*ωc,
-    jls.J1.r => 1e12/R₀
+    jls.J1.r => 1e8/R₀
 )
 
 #time domain simulation 
@@ -34,9 +34,9 @@ p1 = jls.plot(tsol[jls.C1.i][end-400:end].*I₀, title = "Transient Time Plot", 
 # Define the sweep range (8 to 10.0 GHz)
 ω_vec = collect(2*pi*(4.5:0.001:5.0)*1e9/ωc)
 
-sweep_params = delete!(ps, jls.P1.Isrc.ω)
+sweep_params = delete!(ps, jls.P1.source.ω)
 
-sys = jls.HarmonicSystem(model, jls.P1.Isrc.ω, 2)
+sys = jls.HarmonicSystem(model, jls.P1.source.ω, 2)
 prob = jls.HarmonicProblem(sys, ω_vec, sweep_params)
 
 result = jls.solve!(prob)
@@ -69,12 +69,12 @@ pert = jls.perturbation_response(sys, jls.P1.Isrc.I, jpa_params)
 
 ω_down = collect(range(2*pi*5.0e9/ωc, ωp, 120))
 pump_prob = jls.HarmonicProblem(sys, ω_down, jpa_params)
-@btime jls.solve!(pump_prob)
+jls.solve!(pump_prob)
 U₀ = abs.(pump_prob.result.solution[jls.P1.Isrc.ω][:, end])
 
 Ω_vec = collect(2*pi*(4.5:0.001:5.0)*1e9)/ωc
 lin_prob = jls.HarmonicProblem(sys, Ω_vec, jpa_params; U₀=U₀, linear_response = (ωp, pert))
-@btime lin_res = jls.solve!(lin_prob)
+lin_res = jls.solve!(lin_prob)
 
 Z0 = 50.0
 V_sig = I₀*R₀.*jls.get_output(sys, lin_prob, lin_res, "P1₊dφ", 1)
