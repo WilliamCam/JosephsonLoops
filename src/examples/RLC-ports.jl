@@ -75,6 +75,15 @@ lin_res = jls.solve!(lin_prob)
 
 Z0 = 50.0
 V_sig = (jls.Φ₀ / (2*pi)) .* jls.get_output(sys, lin_prob, lin_res, jls.P1.dθ, 1)
+I_sig  = jls.get_output(sys, lin_prob, lin_res, jls.P1.i, 1)
+
+
+ai = @. 0.5 * (V_sig + Z0 * I_sig) / sqrt(Z0)
+bi = @. 0.5 * (V_sig - Z0 * I_sig) / sqrt(Z0)
+p = jls.plot(ω_vec/(2*pi), 20*log10.(abs.(bi./ai)), xlabel="Frequency (Hz)", ylabel="S11 (dB)", title="RLC S-Parameter", lw=2)
+
+
+
 
 using Plots
 plot(abs.(V_sig))

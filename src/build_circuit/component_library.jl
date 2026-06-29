@@ -131,7 +131,7 @@ end
     @equations begin
         [
             connect(Isrc.in, Rsrc.in)
-            i ~ Rsrc.i 
+            i ~ Isrc.i - Rsrc.i 
             dθ ~ D(Rsrc.θ)
             connect(Rsrc.out, in)
             connect(Isrc.out, out)
