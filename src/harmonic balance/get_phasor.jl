@@ -32,7 +32,7 @@ end
 
 #  Harmonic expressions
 
-function get_harmonic_expression(h_sys::HarmonicSystem, var_name::String, order::Int)
+function get_harmonic_expression(h_sys::HarmonicSystem, var::Num, order::Int)
     variable_map = h_sys.variable_map
     var_symbol = Symbolics.unwrap(var)  
     if order == 0

@@ -76,6 +76,9 @@ lin_res = jls.solve!(lin_prob)
 Z0 = 50.0
 V_sig = (jls.Φ₀ / (2*pi)) .* jls.get_output(sys, lin_prob, lin_res, jls.P1.dθ, 1)
 
+using Plots
+plot(abs.(V_sig))
+
 S11 = @. V_sig / (Z0 * δI) - 1
 
 p_mag = jls.plot(Ω_vec/(2*pi*1e9), 20*log10.(abs.(S11)),
