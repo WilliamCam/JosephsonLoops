@@ -40,15 +40,13 @@ sys = jls.HarmonicSystem(model, jls.P1.source.ω, 2)
 prob = jls.HarmonicProblem(sys, ω_vec, sweep_params)
 
 result = jls.solve!(prob)
-out = prob.result.solution[jls.P1.Isrc.ω]
+out = prob.result.solution[jls.P1.source.ω]
 
-current = jls.get_output(prob, result, "C1₊i", 1)
+current = jls.get_output(prob, result, "P1₊i", 1)
 theta_p_mag = jls.get_output(prob, result, "P1₊dφ",  1)
 
-eq = jls.get_harmonic_expression(prob, "C1₊i", 1)
-
-Ii = @. (0.00565e-6/I₀ - current)*I₀
-Vi = @. real.(theta_p_mag)*R₀*I₀
+Ii = @. current*I₀
+Vi = @. (theta_p_mag)*R₀*I₀
 # Calculate Power Waves (a = incident, b = reflected)
 Z0 = 50.0
 ai = @. 0.5 * (Vi + Z0 * Ii) / sqrt(Z0)
@@ -57,20 +55,19 @@ p = jls.plot(ω_vec/(2*pi), 20*log10.(abs.(bi./ai)), xlabel="Frequency (Hz)", yl
 
 #  Linear (small-signal) analysis around a pump tone — mirrors the JPA example in MIT's
 #  JosephsonCircuits.jl (port ∥ 50Ω, series Cc=100fF, junction Lj=1nH ∥ Cj=1000fF).
-sys = jls.HarmonicSystem(model, jls.P1.Isrc.ω, 2, determine_jacobian=true)
+sys = jls.HarmonicSystem(model, jls.P1.source.ω, 2, determine_jacobian=true)
 
 ωp = 2*pi*4.75001e9./ωc
 δI = 11.3e-9/I₀
 
 jpa_params = copy(sweep_params)
-jpa_params[jls.P1.Isrc.I] = δI
+jpa_params[jls.P1.source.I] = δI
 
-pert = jls.perturbation_response(sys, jls.P1.Isrc.I, jpa_params)
+pert = jls.perturbation_response(sys, jls.P1.source.I, jpa_params)
 
-ω_down = collect(range(2*pi*5.0e9/ωc, ωp, 120))
-pump_prob = jls.HarmonicProblem(sys, ω_down, jpa_params)
+pump_prob = jls.HarmonicProblem(sys, ωp, jpa_params)
 jls.solve!(pump_prob)
-U₀ = abs.(pump_prob.result.solution[jls.P1.Isrc.ω][:, end])
+U₀ = abs.(pump_prob.result.solution[jls.P1.source.ω][:, end])
 
 Ω_vec = collect(2*pi*(4.5:0.001:5.0)*1e9)/ωc
 lin_prob = jls.HarmonicProblem(sys, Ω_vec, jpa_params; U₀=U₀, linear_response = (ωp, pert))
