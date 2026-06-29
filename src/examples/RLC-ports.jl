@@ -70,7 +70,7 @@ pert = jls.perturbation_response(sys, jls.P1.Isrc.I, jpa_params)
 ω_down = collect(range(2*pi*5.0e9/ωc, ωp, 120))
 pump_prob = jls.HarmonicProblem(sys, ω_down, jpa_params)
 jls.solve!(pump_prob)
-U₀ = real.(pump_prob.result.solution[jls.P1.Isrc.ω][:, end])
+U₀ = abs.(pump_prob.result.solution[jls.P1.Isrc.ω][:, end])
 
 Ω_vec = collect(2*pi*(4.5:0.001:5.0)*1e9)/ωc
 lin_prob = jls.HarmonicProblem(sys, Ω_vec, jpa_params; U₀=U₀, linear_response = (ωp, pert))
@@ -78,9 +78,15 @@ lin_res = jls.solve!(lin_prob)
 
 Z0 = 50.0
 V_sig = I₀*R₀.*jls.get_output(sys, lin_prob, lin_res, "P1₊dφ", 1)
-using Plots
-plot(abs.(V_sig))
-S11 = @. V_sig / (Z0/R₀ * I₀) - 1
+I_sig = 22.6e-8
+11.3e-9
+
+ai = @. 0.5 * (V_sig + Z0 * I_sig) / sqrt(Z0)
+bi = @. 0.5 * (V_sig - Z0 * I_sig) / sqrt(Z0)
+
+p = jls.plot(ω_vec/(2*pi), 20*log10.(abs.(bi./ai)), xlabel="Frequency (Hz)", ylabel="S11 (dB)", title="RLC S-Parameter", lw=2)
+
+S11 = @. V_sig / (Z0 * I₀) - 1
 
 p_mag = jls.plot(Ω_vec/(2*pi*1e9), 20*log10.(abs.(S11)),
     xlabel="Frequency (GHz)", ylabel="|S₁₁| (dB)",
