@@ -69,7 +69,7 @@ end
         Φₑ = 1.0
     end
     @equations begin
-        Φₑ ~ -in.Φ
+        -in.Φ ~ Φₑ
         0 ~ in.Φ + out.Φ #Flux flowing from left loop is equal to flux entering  
     end
 end
