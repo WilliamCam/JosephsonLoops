@@ -13,7 +13,7 @@ loops = [
 @time circuit = jls.process_netlist(loops)
 @time model, u0, guesses = jls.build_circuit(circuit)
 I₀ = jls.Φ₀/(2π*1000.0e-12)
-R₀ = 100e3
+R₀ = 10.0e3
 ωc = R₀*I₀/(jls.Φ₀/2π)
 
 ps = Dict(
@@ -22,7 +22,7 @@ ps = Dict(
     jls.P1.Rsrc.r => 50.0/R₀,
     jls.C1.βc => 100.0e-15*R₀*ωc,
     jls.J1.βc => 1000.0e-15*R₀*ωc,
-    jls.J1.r => 1.0
+    jls.J1.r => 1e12/R₀
 )
 
 #time domain simulation 
@@ -69,17 +69,16 @@ pert = jls.perturbation_response(sys, jls.P1.Isrc.I, jpa_params)
 
 ω_down = collect(range(2*pi*5.0e9/ωc, ωp, 120))
 pump_prob = jls.HarmonicProblem(sys, ω_down, jpa_params)
-jls.solve!(pump_prob)
+@btime jls.solve!(pump_prob)
 U₀ = abs.(pump_prob.result.solution[jls.P1.Isrc.ω][:, end])
 
 Ω_vec = collect(2*pi*(4.5:0.001:5.0)*1e9)/ωc
 lin_prob = jls.HarmonicProblem(sys, Ω_vec, jpa_params; U₀=U₀, linear_response = (ωp, pert))
-lin_res = jls.solve!(lin_prob)
+@btime lin_res = jls.solve!(lin_prob)
 
 Z0 = 50.0
 V_sig = I₀*R₀.*jls.get_output(sys, lin_prob, lin_res, "P1₊dφ", 1)
-I_sig = 22.6e-8
-11.3e-9
+I_sig = I₀.*jls.get_output(sys, lin_prob, lin_res, "P1₊i", 1)
 
 ai = @. 0.5 * (V_sig + Z0 * I_sig) / sqrt(Z0)
 bi = @. 0.5 * (V_sig - Z0 * I_sig) / sqrt(Z0)
