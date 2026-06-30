@@ -24,7 +24,7 @@ ps = Dict(
 
 #time domain simulation 
 tspan = (0.0, 1e-6)
-tsol = @btime jls.tsolve(model, guesses, ps, tspan; guesses=guesses)
+tsol = jls.tsolve(model, guesses, ps, tspan; guesses=guesses)
 p1 = jls.plot(tsol[jls.C1.i][end-400:end], title = "Transient Time Plot", xlabel = "t", ylabel = "I_C1")
 
 #hb Setup
@@ -39,12 +39,12 @@ prob = jls.HarmonicProblem(sys, ω_vec, sweep_params)
 result = jls.solve!(prob)
 out = prob.result.solution[jls.P1.Isrc.ω]
 
-current = jls.get_output(prob, result, jls.C1.i, 1)
+current = jls.get_output(prob, result, jls.P1.i, 1)
 theta_p_mag = jls.get_output(prob, result, jls.P1.dθ,  1)
 
 eq = jls.get_harmonic_expression(prob, jls.C1.i, 1)
 
-Ii = @. (0.00565e-6 - current)
+Ii = @. (current)
 Vi = @. (jls.Φ₀ / (2*pi) * real.(theta_p_mag)) 
 # Calculate Power Waves (a = incident, b = reflected)
 Z0 = 50.0
