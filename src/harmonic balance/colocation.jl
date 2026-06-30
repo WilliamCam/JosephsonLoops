@@ -3,7 +3,76 @@ using SymbolicUtils
 using QuestBase
 
 
-function harmonic_solution(N, tvar, wvar, Afourier, Bfourier; get_derivatives=false, dAfourier=nothing, dBfourier=nothing)
+function harmonic_solution_original(N, tvar, wvar, Afourier, Bfourier; 
+    get_derivatives=false, dAfourier=nothing, dBfourier=nothing,
+    )
+    if get_derivatives
+        @assert all([dAfourier, dBfourier] .!= nothing) "Need derivatives of harmonic variables e.g. 'dA[1]' "
+        dX = dAfourier[1]
+        d2X = 0
+        vars = [Afourier[1]]
+        dvars = [dAfourier[1]]
+    end
+    #TODO rename DC term to avoid annoying indexing i.e. A₀ + A₁Sin(ωt) + B₁Cos(ωt) would be
+    X = Afourier[1]  # Start with the DC term A₁
+    for n in 1:N
+        X += Afourier[n + 1] * cos(n * wvar * tvar) + Bfourier[n] * sin(n * wvar * tvar)
+        if get_derivatives
+            #dXdt
+            dX += (dAfourier[n+1] + n*wvar*Bfourier[n]) * cos(n * wvar * tvar) + (dBfourier[n] - n*wvar*Afourier[n+1]) * sin(n * wvar * tvar)
+            #d2Xdt2 (exact: (A'' + 2nωB' - (nω)²A)cos + (B'' - 2nωA' - (nω)²B)sin, dropping
+            #the second-order slow envelope terms A''/B'')
+            _cos_comp = (-(n*wvar)^2 * Afourier[n+1] + 2*n*wvar*dBfourier[n]) * cos(n * wvar * tvar)
+            _sin_comp = (-(n*wvar)^2 * Bfourier[n] - 2*n*wvar*dAfourier[n+1]) * sin(n * wvar * tvar)
+            d2X += _cos_comp + _sin_comp
+            push!(dvars, dAfourier[n+1], dBfourier[n])
+            push!(vars, Afourier[n+1], Bfourier[n])
+        end
+    end
+    if get_derivatives
+        return X, dX, d2X, vars, dvars
+    else
+        return X
+    end
+end
+
+function harmonic_solution(N, tvar, wvar, Afourier, Bfourier)
+    #TODO rename DC term to avoid annoying indexing i.e. A₀ + A₁Sin(ωt) + B₁Cos(ωt) would be
+    X = Afourier[1]  # Start with the DC term A₁
+    for n in 1:N
+        X += Afourier[n + 1] * cos(n * wvar * tvar) + Bfourier[n] * sin(n * wvar * tvar)
+    end
+    return X
+end
+
+function jacobian_vars(N, tvar, wvar, Afourier, Bfourier, dAfourier, dBfourier)
+    #Retrieves symbolic expressions and collects all Num's for determiniation of jacobian
+    X = Afourier[1]  # Start with the DC term A₁
+    dX = dAfourier[1]
+    d2X = 0
+    vars = [Afourier[1]]
+    dvars = [dAfourier[1]]
+    #TODO rename DC term to avoid annoying indexing i.e. A₀ + A₁Sin(ωt) + B₁Cos(ωt) would be
+    for n in 1:N
+        x_harmonic = Afourier[n + 1] * cos(n * wvar * tvar) + Bfourier[n] * sin(n * wvar * tvar)
+        X += x_harmonic
+        #dXdt
+        dX_harmonic = Symbolics.substitute(expand_derivatives(D(x_harmonic)), Dict([D(Afourier[n+1])=>dAfourier[n+1],D(Bfourier[n+1])=>dBfourier[n+1]]))
+        dX += dX_harmonic
+        #d2Xdt2 (exact: (A'' + 2nωB' - (nω)²A)cos + (B'' - 2nωA' - (nω)²B)sin, dropping
+        #the second-order slow envelope terms A''/B'')
+        _cos_comp = (-(n*wvar)^2 * Afourier[n+1] + 2*n*wvar*dBfourier[n]) * cos(n * wvar * tvar)
+        _sin_comp = (-(n*wvar)^2 * Bfourier[n] - 2*n*wvar*dAfourier[n+1]) * sin(n * wvar * tvar)
+        d2X += _cos_comp + _sin_comp
+        push!(dvars, dAfourier[n+1], dBfourier[n])
+        push!(vars, Afourier[n+1], Bfourier[n])
+    end
+    return dX, d2X, vars, dvars
+end
+
+function harmonic_solution_3WM(N, tvar, wvar, Afourier, Bfourier; 
+    get_derivatives=false, dAfourier=nothing, dBfourier=nothing,
+    )
     if get_derivatives
         @assert all([dAfourier, dBfourier] .!= nothing) "Need derivatives of harmonic variables e.g. 'dA[1]' "
         dX = dAfourier[1]
