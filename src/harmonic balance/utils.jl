@@ -215,7 +215,7 @@ D2 = Differential(t)^2
 # Define individual rules
 # Rule 1: A'' / B'' => 0
 # Rule 2: B'' / A'' => 0
-rules = Chain([
+truncate_slow_D2_terms = Chain([
     @rule(~c * D2(~f) / D2(~g) => 0),
     @rule(~c * D2(~g) / D2(~f) => 0)
 ])
@@ -224,5 +224,5 @@ rules = Chain([
 expr = (D2(A)/D2(B)) + (D2(B)/D2(A)) + A(t)
 
 # Apply the rules
-simplified_expr = Postwalk(rules)(expr)
+simplified_expr = Postwalk(truncate_slow_D2_terms)(expr)
 # Result: A(t)
