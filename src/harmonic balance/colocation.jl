@@ -126,6 +126,7 @@ function harmonic_equation(eqs, states, tvar, wvar, N; jac=false)
     @assert M < 13 "System of equations is too large"
     coeff_labels = 'A':'Z'
     X = Num[]
+    X_dt = Num[]   
     harmonic_system, d_harmonic_system = Equation[], Equation[]
     harmonic_eqs, d_harmonic_eqs = eqs, eqs
     if jac
@@ -173,6 +174,7 @@ function harmonic_equation(eqs, states, tvar, wvar, N; jac=false)
         end
         push!(X, harmonic_state)
         dXdt, d2Xdt2 = get_derivatives(harmonic_state, tvar)
+        push!(X_dt, dXdt)
         # if all(only_derivatives(eq, states[k], t) for eq in harmonic_eqs)
         #     problematic_var = states[k]
         #     print("Warning: harmonic variable mapped to first derivative i.e. D($problematic_var) = $harmonic_state")
@@ -209,9 +211,9 @@ function harmonic_equation(eqs, states, tvar, wvar, N; jac=false)
         rotated_system = rotate_to_harmonic_frame(M, N, Nt, d_harmonic_system)
         #TODO: Check orderiing for M>1 larger systems
         J0, J1 = build_jacobians(rotated_system, vars, dvars)
-        return sys, X, variable_map, (J0, J1)
+        return sys, X, variable_map, (J0, J1), X_dt
     else
-        return sys, X, variable_map
+        return sys, X, variable_map, X_dt
     end
 end
 

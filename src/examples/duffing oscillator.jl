@@ -33,8 +33,8 @@ sweep_res = jls.solve!(h_prob)
 
 # Pump amplitude vs ω: DC + fundamental magnitude. get_output takes the variable name
 # directly, so there's no need to pull coefficient symbols out of the variable_map.
-x_dc   = jls.get_output(h_prob, sweep_res, "x", 0)
-x_fund = jls.get_output(h_prob, sweep_res, "x", 1)
+x_dc   = jls.get_output(h_prob, sweep_res, x, 0)
+x_fund = jls.get_output(h_prob, sweep_res, x, 1)
 solution = real.(x_dc) .+ abs.(x_fund)
 plot(ω_vec, solution)
 
@@ -55,6 +55,6 @@ jls.solve!(lin_prob)
 
 # Response phasor of x at the fundamental, by name: A + iB with complex cos/sin envelope
 # responses A, B. The sideband amplitude at Ω is |A + iB|/2.
-x_resp = jls.get_output(h_sys, lin_prob, lin_prob.result, "x", 1)
+x_resp = jls.get_output(h_sys, lin_prob, lin_prob.result, x, 1)
 out = abs.(x_resp) ./ 2
 plot(Ω, out)
