@@ -134,7 +134,7 @@ function harmonic_equation(eqs, states, tvar, wvar, N; jac=false)
         dyn_subs = Dict{Any, Any}()
     end
     # loop over each state varibale for multiple harmonic equations
-    variable_map = Dict{Tuple{String, Int, Symbol}, Num}()
+    variable_map = Dict{Tuple{SymbolicUtils.BasicSymbolic{Real}, Int, Symbol}, Num}()
 
     for k in 1:M
         cos_labels, sin_labels = Symbol(coeff_labels[2*k-1]), Symbol(coeff_labels[2*k])
@@ -142,11 +142,12 @@ function harmonic_equation(eqs, states, tvar, wvar, N; jac=false)
         sin_sym_arr = @variables $sin_labels[1:N]
         cos_vars, sin_vars = append!(cos_sym_arr, sin_sym_arr)
 
-        var_name = replace(string(states[k]), "(t)" => "")
-        variable_map[(var_name, 0, :Cos)] = cos_vars[1]
+        #populate varibable map
+        state_symbol = Symbolics.unwrap(states[k])
+        variable_map[(state_symbol, 0, :Cos)] = cos_vars[1]
         for n in 1:N
-            variable_map[(var_name, n, :Cos)] = cos_vars[n+1]
-            variable_map[(var_name, n, :Sin)] = sin_vars[n]
+            variable_map[(state_symbol, n, :Cos)] = cos_vars[n+1]
+            variable_map[(state_symbol, n, :Sin)] = sin_vars[n]
         end
 
         harmonic_state = harmonic_solution(N, tvar, wvar, [cos_vars, sin_vars])
@@ -163,7 +164,12 @@ function harmonic_equation(eqs, states, tvar, wvar, N; jac=false)
             dyn_subs[Differential(tvar)(states[k])]                     = dXdt
             dyn_subs[states[k]]                                         = harmonic_state
             #TODO Vars ordering is not correct!
-            
+            push!(vars, cos_vars[1]) #DC term
+            push!(vars, d_cos_vars[1]) #DC term ?
+            for n in 1:N
+                push!(vars, cos_vars[n+1], sin_vars[n])
+                push!(vars, d_cos_vars[n+1], d_sin_vars[n])
+            end
         end
         push!(X, harmonic_state)
         dXdt, d2Xdt2 = get_derivatives(harmonic_state, tvar)
