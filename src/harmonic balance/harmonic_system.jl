@@ -9,7 +9,7 @@ struct HarmonicSystem
     time_domain_system::ModelingToolkit.System
     ω::Num
     N::Int
-    harmonic_ansatz::Any
+    harmonic_ansatz::Vector{Num}
     harmonic_ansatz_dt::Any   # per-state d/dt of the ansatz, cached from harmonic_equation (reused by reconstruct)
     full_eqs::Any
     variable_map::Dict{Tuple{Any, Int, Symbol}, Num}

@@ -42,8 +42,8 @@ prob = jls.HarmonicProblem(sys, ω_vec, sweep_params)
 result = jls.solve!(prob)
 out = prob.result.solution[jls.P1.source.ω]
 
-current = jls.get_output(prob, result, "P1₊i", 1)
-theta_p_mag = jls.get_output(prob, result, "P1₊dφ",  1)
+current = jls.get_output(prob, result, jls.P1.i, 1)
+theta_p_mag = jls.get_output(prob, result, jls.P1.dφ,  1)
 
 Ii = @. current*I₀
 Vi = @. (theta_p_mag)*R₀*I₀
@@ -74,15 +74,13 @@ lin_prob = jls.HarmonicProblem(sys, Ω_vec, jpa_params; U₀=U₀, linear_respon
 lin_res = jls.solve!(lin_prob)
 
 Z0 = 50.0
-V_sig = I₀*R₀.*jls.get_output(sys, lin_prob, lin_res, "P1₊dφ", 1)
-I_sig = I₀.*jls.get_output(sys, lin_prob, lin_res, "P1₊i", 1)
+V_sig = I₀*R₀.*jls.get_output(sys, lin_prob, lin_res, jls.P1.dφ, 1)
+I_sig = I₀.*jls.get_output(sys, lin_prob, lin_res, jls.P1.i, 1)
 
 ai = @. 0.5 * (V_sig + Z0 * I_sig) / sqrt(Z0)
 bi = @. 0.5 * (V_sig - Z0 * I_sig) / sqrt(Z0)
 
 p = jls.plot(ω_vec/(2*pi), 20*log10.(abs.(bi./ai)), xlabel="Frequency (Hz)", ylabel="S11 (dB)", title="RLC S-Parameter", lw=2)
-
-S11 = @. V_sig / (Z0 * I₀) - 1
 
 p_mag = jls.plot(Ω_vec/(2*pi*1e9), 20*log10.(abs.(S11)),
     xlabel="Frequency (GHz)", ylabel="|S₁₁| (dB)",

@@ -160,16 +160,16 @@ function harmonic_equation(eqs, states, tvar, wvar, N; jac=false)
             d_cos_vars, d_sin_vars = append!(d_cos_sym_arr, d_sin_sym_arr)
         
 
-            dXdt, d2Xdt2, _vars, _dvars = jacobian_vars(N, tvar, wvar, [cos_vars, sin_vars] ,[d_cos_vars,d_sin_vars])
+            dXdt, d2Xdt2 = jacobian_vars(N, tvar, wvar, [cos_vars, sin_vars] ,[d_cos_vars,d_sin_vars])
             dyn_subs[Differential(tvar)(Differential(tvar)(states[k]))] = d2Xdt2
             dyn_subs[Differential(tvar)(states[k])]                     = dXdt
             dyn_subs[states[k]]                                         = harmonic_state
             #TODO Vars ordering is not correct!
             push!(vars, cos_vars[1]) #DC term
-            push!(vars, d_cos_vars[1]) #DC term ?
+            push!(dvars, d_cos_vars[1]) #DC term ?
             for n in 1:N
                 push!(vars, cos_vars[n+1], sin_vars[n])
-                push!(vars, d_cos_vars[n+1], d_sin_vars[n])
+                push!(dvars, d_cos_vars[n+1], d_sin_vars[n])
             end
         end
         push!(X, harmonic_state)
@@ -210,6 +210,10 @@ function harmonic_equation(eqs, states, tvar, wvar, N; jac=false)
     if jac
         rotated_system = rotate_to_harmonic_frame(M, N, Nt, d_harmonic_system)
         #TODO: Check orderiing for M>1 larger systems
+        print(vars)
+        print("\n")
+        print(dvars)
+        print("\n")
         J0, J1 = build_jacobians(rotated_system, vars, dvars)
         return sys, X, variable_map, (J0, J1), X_dt
     else
