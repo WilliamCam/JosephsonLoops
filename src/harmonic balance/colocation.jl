@@ -2,7 +2,6 @@ using Symbolics
 using SymbolicUtils
 using QuestBase
 
-
 function harmonic_solution_original(N, tvar, wvar, Afourier, Bfourier; 
     get_derivatives=false, dAfourier=nothing, dBfourier=nothing,
     )
@@ -36,7 +35,9 @@ function harmonic_solution_original(N, tvar, wvar, Afourier, Bfourier;
     end
 end
 
-function harmonic_solution(N, tvar, wvar, Afourier, Bfourier)
+function harmonic_solution(N, tvar, wvar, fourier_vars)
+    @assert length(fourier_vars)==2 "Sin and Cos Fourier coefficients"
+    Afourier, Bfourier = fourier_vars
     #TODO rename DC term to avoid annoying indexing i.e. A₀ + A₁Sin(ωt) + B₁Cos(ωt) would be
     X = Afourier[1]  # Start with the DC term A₁
     for n in 1:N
@@ -45,29 +46,42 @@ function harmonic_solution(N, tvar, wvar, Afourier, Bfourier)
     return X
 end
 
-function jacobian_vars(N, tvar, wvar, Afourier, Bfourier, dAfourier, dBfourier)
+function jacobian_vars(N, tvar, wvar, fourier_vars, d_fourier_vars)
+    @assert length(fourier_vars)==2 "Sin and Cos Fourier coefficients"
+    Afourier, Bfourier = fourier_vars
+    dAfourier, dBfourier = d_fourier_vars
+    #TODO: Remove derrivative variable of DC term
+    cos_variables = (@variables a(t)[1:N+1])[1]
+    sin_variables = (@variables b(t)[1:N])[1]
+    d_cos_variables = (@variables da(t)[1:N+1])[1]
+    d_sin_variables = (@variables db(t)[1:N])[1]
+    sub_dict = merge(
+        Dict([var_t => sym for (var_t,sym) in zip(cos_variables, Afourier)]),
+        Dict([var_t => sym for (var_t,sym) in zip(sin_variables, Bfourier)]),
+        Dict([var_t => sym for (var_t,sym) in zip(d_cos_variables, dAfourier)]),
+        Dict([var_t => sym for (var_t,sym) in zip(d_sin_variables, dBfourier)])
+    )
     #Retrieves symbolic expressions and collects all Num's for determiniation of jacobian
-    X = Afourier[1]  # Start with the DC term A₁
-    dX = dAfourier[1]
+    X = cos_variables[1]  # Start with the DC term A₁
+    dX = d_cos_variables[1]
     d2X = 0
-    vars = [Afourier[1]]
-    dvars = [dAfourier[1]]
     #TODO rename DC term to avoid annoying indexing i.e. A₀ + A₁Sin(ωt) + B₁Cos(ωt) would be
     for n in 1:N
-        x_harmonic = Afourier[n + 1] * cos(n * wvar * tvar) + Bfourier[n] * sin(n * wvar * tvar)
+        x_harmonic = cos_variables[n + 1] * cos(n * wvar * tvar) + sin_variables[n] * sin(n * wvar * tvar)
         X += x_harmonic
         #dXdt
-        dX_harmonic = Symbolics.substitute(expand_derivatives(D(x_harmonic)), Dict([D(Afourier[n+1])=>dAfourier[n+1],D(Bfourier[n+1])=>dBfourier[n+1]]))
+        dX_harmonic = substitute(expand_derivatives(
+            D(x_harmonic)), Dict([D(cos_variables[n+1])=>d_cos_variables[n+1],D(sin_variables[n])=>d_sin_variables[n]])
+            )
         dX += dX_harmonic
-        #d2Xdt2 (exact: (A'' + 2nωB' - (nω)²A)cos + (B'' - 2nωA' - (nω)²B)sin, dropping
-        #the second-order slow envelope terms A''/B'')
-        _cos_comp = (-(n*wvar)^2 * Afourier[n+1] + 2*n*wvar*dBfourier[n]) * cos(n * wvar * tvar)
-        _sin_comp = (-(n*wvar)^2 * Bfourier[n] - 2*n*wvar*dAfourier[n+1]) * sin(n * wvar * tvar)
-        d2X += _cos_comp + _sin_comp
-        push!(dvars, dAfourier[n+1], dBfourier[n])
-        push!(vars, Afourier[n+1], Bfourier[n])
+        #d2Xdt2, simplify the expression and remove slow second order terms A''/B''
+        d2X_harmonic = simplify(expand_derivatives(D(dX_harmonic)), expand=true, rewriter=remove_slow_d2_rewriter)
+        d2X += d2X_harmonic
     end
-    return dX, d2X, vars, dvars
+    @assert has_derivative(d2X)==false "Differential operator D(t) cannot be in $d2X -> replace with Symbolics variable e.g. 'dA[1]'"
+    dX = substitute(dX, sub_dict)
+    d2X = substitute(d2X, sub_dict)
+    return dX, d2X
 end
 
 function harmonic_solution_3WM(N, tvar, wvar, Afourier, Bfourier; 
@@ -109,7 +123,7 @@ function harmonic_equation(eqs, states, tvar, wvar, N; jac=false)
         eqs = [eqs]
     end
     @assert (M == length(eqs)) "System does not have the same number of equations as state variables"
-    @assert M < 26 "System of equations is too large"
+    @assert M < 13 "System of equations is too large"
     coeff_labels = 'A':'Z'
     X = Num[]
     harmonic_system, d_harmonic_system = Equation[], Equation[]
@@ -123,43 +137,33 @@ function harmonic_equation(eqs, states, tvar, wvar, N; jac=false)
     variable_map = Dict{Tuple{String, Int, Symbol}, Num}()
 
     for k in 1:M
-        cos_coeff_labels, sin_coeff_labels = Symbol(coeff_labels[2*k-1]), Symbol(coeff_labels[2*k])
-        cos_coeffs = @variables $cos_coeff_labels[1:N+1]
-        sin_coeffs = @variables $sin_coeff_labels[1:N]
-        
-        # Populate variable map 
-        actual_cos = cos_coeffs[1]
-        actual_sin = sin_coeffs[1]
+        cos_labels, sin_labels = Symbol(coeff_labels[2*k-1]), Symbol(coeff_labels[2*k])
+        cos_sym_arr = @variables $cos_labels[1:N+1]
+        sin_sym_arr = @variables $sin_labels[1:N]
+        cos_vars, sin_vars = append!(cos_sym_arr, sin_sym_arr)
+
         var_name = replace(string(states[k]), "(t)" => "")
-        #Dc
-        variable_map[(var_name, 0, :Cos)] = actual_cos[1]
-        #Ac
+        variable_map[(var_name, 0, :Cos)] = cos_vars[1]
         for n in 1:N
-            variable_map[(var_name, n, :Cos)] = actual_cos[n+1]
-            variable_map[(var_name, n, :Sin)] = actual_sin[n]
+            variable_map[(var_name, n, :Cos)] = cos_vars[n+1]
+            variable_map[(var_name, n, :Sin)] = sin_vars[n]
         end
 
-        harmonic_state = harmonic_solution(N, tvar, wvar, actual_cos, actual_sin)
+        harmonic_state = harmonic_solution(N, tvar, wvar, [cos_vars, sin_vars])
         #Linearisation via jacobian requires introduction of derivative harmonic variables i.e. A[1]'
         if jac
-            d_cos_coeff_labels, d_sin_coeff_labels = Symbol('d' * coeff_labels[2*k-1]), Symbol('d' * coeff_labels[2*k])
-            d_cos_coeffs = @variables $d_cos_coeff_labels[1:N+1]
-            d_sin_coeffs = @variables $d_sin_coeff_labels[1:N]
+            d_cos_labels, d_sin_labels = Symbol('d' * coeff_labels[2*k-1]), Symbol('d' * coeff_labels[2*k])
+            d_cos_sym_arr = @variables $d_cos_labels[1:N+1]
+            d_sin_sym_arr = @variables $d_sin_labels[1:N]
+            d_cos_vars, d_sin_vars = append!(d_cos_sym_arr, d_sin_sym_arr)
+        
 
-            actual_dcos = d_cos_coeffs[1]
-            actual_dsin = d_sin_coeffs[1]
-
-            _, _dXdt, _d2Xdt2, _vars, _dvars = harmonic_solution(N, tvar, wvar, actual_cos, actual_sin, 
-                get_derivatives=true, dAfourier = actual_dcos, dBfourier = actual_dsin
-            )
-      
-    
-            dyn_subs[Differential(tvar)(Differential(tvar)(states[k]))] = _d2Xdt2
-            dyn_subs[Differential(tvar)(states[k])]                     = _dXdt
+            dXdt, d2Xdt2, _vars, _dvars = jacobian_vars(N, tvar, wvar, [cos_vars, sin_vars] ,[d_cos_vars,d_sin_vars])
+            dyn_subs[Differential(tvar)(Differential(tvar)(states[k]))] = d2Xdt2
+            dyn_subs[Differential(tvar)(states[k])]                     = dXdt
             dyn_subs[states[k]]                                         = harmonic_state
-
-            append!(vars, _vars)
-            append!(dvars,_dvars)
+            #TODO Vars ordering is not correct!
+            
         end
         push!(X, harmonic_state)
         dXdt, d2Xdt2 = get_derivatives(harmonic_state, tvar)

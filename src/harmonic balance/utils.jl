@@ -10,6 +10,10 @@ function var_is_in(vars::Vector, target_var::SymbolicUtils.BasicSymbolic{Real})
 return ret
 end
 
+function has_derivative(equation)
+    return any(eq -> !isempty(Symbolics.filterchildren(Symbolics.is_derivative, eq)), equation)
+end
+
 function var_is_in(vars::Vector, target_var::Num)
     ret = false
     for var in vars
@@ -203,26 +207,3 @@ function perturbation_response(h_sys::HarmonicSystem, source_param::Num, paramet
     end
     return U
 end
-
-using Symbolics, SymbolicUtils
-using SymbolicUtils.Rewriters
-
-
-@variables t
-@variables A(t), B(t)
-D2 = Differential(t)^2
-
-# Define individual rules
-# Rule 1: A'' / B'' => 0
-# Rule 2: B'' / A'' => 0
-truncate_slow_D2_terms = Chain([
-    @rule(~c * D2(~f) / D2(~g) => 0),
-    @rule(~c * D2(~g) / D2(~f) => 0)
-])
-
-# Example expression containing both types of terms
-expr = (D2(A)/D2(B)) + (D2(B)/D2(A)) + A(t)
-
-# Apply the rules
-simplified_expr = Postwalk(truncate_slow_D2_terms)(expr)
-# Result: A(t)

@@ -26,7 +26,7 @@ end
 # be dropped from the problem structs. Restricted to state variables: an observed
 # quantity's expression would have to be differentiated at the working point (δf = ∇f·δc),
 # not evaluated at the perturbation — TODO.
-function get_output(h_sys::HarmonicSystem, lin_prob::LinearisedProblem, result::HarmonicResult, expression::Equation, order::Int = 1)
+function get_output(h_sys::HarmonicSystem, lin_prob::LinearisedProblem, result::HarmonicResult, var_name::String, order::Int = 1)
     haskey(h_sys.variable_map, (var_name, max(order, 1), :Cos)) ||
         error("Linearised get_output supports state variables only; $var_name is not a state. " *
               "States: $(sort!(unique(k[1] for k in keys(h_sys.variable_map))))")
