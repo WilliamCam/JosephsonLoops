@@ -14,17 +14,34 @@ function substitute_to_fixpoint(expr, subs; max_iters = 20, transform = identity
 end
 
 function get_output(h_prob::HarmonicProblem, result::HarmonicResult, var::Num, order::Int = 1)
+   
+    u = Symbolics.unwrap(var)
+    if Symbolics.iscall(u) && Symbolics.operation(u) === getindex
+        _, i, j = Symbolics.arguments(u)
+        S_ij = Symbolics.substitute(only(get_HB_scattering_matrix(h_prob.harmonic_system.time_domain_system, i, j)), h_prob.parameters)
+        port_vars = Symbolics.get_variables(S_ij)
+        scattering = Symbolics.build_function(Symbolics.unwrap(S_ij), port_vars...; expression = Val{false})
+        phasors = [get_output(h_prob, result, Num(v), order) for v in port_vars]
+        return scattering.(phasors...)
+    end
     expression = get_harmonic_expression(h_prob.harmonic_system, var, order)
     return apply_harmonic_expression(h_prob, result, expression)
 end
 
-# Small-signal response phasor of `var` (the variable symbol) at the requested order. The harmonic system
-# is passed in (rather than read off the problem) so the harmonic_system field can later
-# be dropped from the problem structs. Restricted to state variables: an observed
-# quantity's expression would have to be differentiated at the working point (δf = ∇f·δc),
 # not evaluated at the perturbation — TODO.
 function get_output(h_sys::HarmonicSystem, lin_prob::LinearisedProblem, result::HarmonicResult, var::Num, order::Int = 1)
-    haskey(h_sys.variable_map, (Symbolics.unwrap(var), max(order, 1), :Cos)) ||
+
+    u = Symbolics.unwrap(var)
+    if Symbolics.iscall(u) && Symbolics.operation(u) === getindex
+        _, i, j = Symbolics.arguments(u)
+        S_ij = Symbolics.substitute(only(get_HB_scattering_matrix(h_sys.time_domain_system, i, j)), lin_prob.parameters)
+        port_vars = Symbolics.get_variables(S_ij)
+        scattering = Symbolics.build_function(Symbolics.unwrap(S_ij), port_vars...; expression = Val{false})
+        phasors = [get_output(h_sys, lin_prob, result, Num(v), order) for v in port_vars]
+        return scattering.(phasors...)
+    end
+
+    haskey(h_sys.variable_map, (u, max(order, 1), :Cos)) ||
         error("Linearised get_output supports state variables only; $var is not a state.")
     expression = get_harmonic_expression(h_sys, var, order)
     return apply_harmonic_expression(h_sys, lin_prob, result, expression)
@@ -62,8 +79,6 @@ function apply_harmonic_expression(h_prob::HarmonicProblem, result::HarmonicResu
     solution = result.solution[ω]
     input_syms = Symbolics.unwrap.(unknowns(system))
 
-    #A bit unsure if this is computationally efficient, need to ask will - ai suggested
-    #if its purely a state then you just grab the cos/sin rows from sol array, otherwise compile
     cos_row = findfirst(x -> isequal(x, Symbolics.unwrap(expression[1])), input_syms)
     sin_row = findfirst(x -> isequal(x, Symbolics.unwrap(expression[2])), input_syms)
     if cos_row !== nothing && sin_row !== nothing
@@ -79,16 +94,14 @@ function apply_harmonic_expression(h_prob::HarmonicProblem, result::HarmonicResu
     end
 end
 
-# Linearised counterpart: the response array rows follow the jacobian's `vars` ordering,
-# and the responses are complex, so evaluate the same expressions with complex inputs.
-# For a plain state this reduces to resp[row(cos)] + im*resp[row(sin)].
+
 function apply_harmonic_expression(h_sys::HarmonicSystem, lin_prob::LinearisedProblem, result::HarmonicResult, expression::Tuple{Num,Num})
     isnothing(lin_prob.parameter_sweep) || error("get_output supports ω-only sweeps")
     ω, ω_values = lin_prob.ω_sweep
     ω_vec = ω_values isa Number ? [Float64(ω_values)] : ω_values
 
     solution = result.solution[ω]
-    states = h_sys.full_eqs.states   # cache
+    states = h_sys.full_eqs.states   
     vmap = h_sys.variable_map
     vars = Num[]
     for s in states

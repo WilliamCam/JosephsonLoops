@@ -25,12 +25,12 @@ function var_index(vars::Vector, target_var::SymbolicUtils.BasicSymbolic{Real})
     return findfirst(x->isequal(x, target_var),vars)
 end
 
-function get_HB_scattering_matrix(model::System,i::Char,j::Char)
-    port_i_sym = Symbol('P'*i)
-    port_j_sym = Symbol('P'*j)
+function get_HB_scattering_matrix(model::System,i::Int,j::Int)
+    port_i_sym = Symbol('P'*string(i))
+    port_j_sym = Symbol('P'*string(j))
     @assert (hasproperty(model,port_i_sym)) "Error: Port $i not defined in variable map"
     @assert (hasproperty(model,port_j_sym)) "Error: Port $j not defined in variable map"
-    N_ports = maximum([parse(Int,port_index) for port_index in [i,j]])
+    N_ports = maximum((i,j))
     @assert (N_ports < 3) "Maximum of 2 port networks supported"
     a = zeros(Num,1,N_ports)
     b = zeros(Num,1,N_ports)

@@ -44,13 +44,12 @@ theta_p_mag = jls.get_output(prob, result, jls.P1.dθ,  1)
 
 eq = jls.get_harmonic_expression(prob, jls.C1.i, 1)
 
-Ii = @. (current)
-Vi = @. (jls.Φ₀ / (2*pi) * real.(theta_p_mag)) 
-# Calculate Power Waves (a = incident, b = reflected)
-Z0 = 50.0
-ai = @. 0.5 * (Vi + Z0 * Ii) / sqrt(Z0)
-bi = @. 0.5 * (Vi - Z0 * Ii) / sqrt(Z0)
-p = jls.plot(ω_vec/(2*pi), 20*log10.(abs.(bi./ai)), xlabel="Frequency (Hz)", ylabel="S11 (dB)", title="RLC S-Parameter", lw=2)
+jls.get_HB_scattering_matrix(prob.harmonic_system.time_domain_system, 1, 1)
+# Full nonlinear S11 from the harmonic-balance solution. The circuit is lossless, so |S11| = 1
+# and the resonance shows up as a 180° phase swing — plot Re(S11), which dips from +1 to −1.
+@variables S[1:2, 1:2]
+S11_nl = jls.get_output(prob, result, S[1, 1], 1)
+p = jls.plot(ω_vec/(2*pi), abs.(S11_nl), xlabel="Frequency (Hz)", ylabel="Re(S11)", title="RLC S-Parameter", lw=2)
 
 #  Linear (small-signal) analysis around a pump tone — mirrors the JPA example in MIT's
 #  JosephsonCircuits.jl (port ∥ 50Ω, series Cc=100fF, junction Lj=1nH ∥ Cj=1000fF).
@@ -75,12 +74,9 @@ lin_res = jls.solve!(lin_prob)
 
 Z0 = 50.0
 V_sig = (jls.Φ₀ / (2*pi)) .* jls.get_output(sys, lin_prob, lin_res, jls.P1.dθ, 1)
-I_sig  = jls.get_output(sys, lin_prob, lin_res, jls.P1.i, 1)
 
-
-ai = @. 0.5 * (V_sig + Z0 * I_sig) / sqrt(Z0)
-bi = @. 0.5 * (V_sig - Z0 * I_sig) / sqrt(Z0)
-p = jls.plot(ω_vec/(2*pi), 20*log10.(abs.(bi./ai)), xlabel="Frequency (Hz)", ylabel="S11 (dB)", title="RLC S-Parameter", lw=2)
+S11 = jls.get_output(sys, lin_prob, lin_res, S[1, 1], 1)
+p = jls.plot(Ω_vec/(2*pi), 20*log10.(abs.(S11)), xlabel="Frequency (Hz)", ylabel="S11 (dB)", title="RLC S-Parameter", lw=2)
 
 
 
@@ -92,7 +88,7 @@ S11 = @. V_sig / (Z0 * δI) - 1
 
 p_mag = jls.plot(Ω_vec/(2*pi*1e9), 20*log10.(abs.(S11)),
     xlabel="Frequency (GHz)", ylabel="|S₁₁| (dB)",
-    title="JPA gain — JosephsonLoops vs JosephsonCircuits.jl",
+    title="JPA gain — JosephsonLoops",
     lw=2, label="JosephsonLoops", legend=:topright)
 
 
