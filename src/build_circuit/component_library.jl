@@ -99,10 +99,11 @@ end
     @parameters begin
         βc = 1.0
         r = 1.0
+        α = 1.0
     end
     @equations begin
         #TODO: Multiple junctions 
-        D2(φ) ~ (i - sin(φ) - D(φ)/(r))/(βc)  
+        D2(φ) ~ (i - α*sin(φ) - D(φ)/(r))/(βc)  
     end
 end
 
