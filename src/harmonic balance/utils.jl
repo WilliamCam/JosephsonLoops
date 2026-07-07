@@ -210,3 +210,84 @@ function perturbation_response(h_sys::HarmonicSystem, source_param::Num, paramet
     end
     return U
 end
+
+struct FourierBasis
+    dc_coeff::Num
+    d_dc_coeff::Num
+    cos_coeffs::Symbolics.Arr{Num, 1}
+    sin_coeffs::Symbolics.Arr{Num, 1}
+
+    # Symbolic first derivative variable e.g (d/dt A₁) needed for linearised jacobian J₁
+    d_cos_coeffs::Symbolics.Arr{Num, 1}
+    d_sin_coeffs::Symbolics.Arr{Num, 1}
+
+    fourier_indicies::Vector{Tuple{Int,Int}}
+    coeff_map::Dict{Num,Tuple{Tuple{Int,Int},Symbol}}
+end
+
+function diamond_truncation_indices(N::Int)
+    indices = Tuple{Int, Int}[]
+    for m in 0:N
+        n_min = (m == 0) ? 0 : -N
+        for n in n_min:N
+            if m + abs(n) <= N
+                push!(indices, (m, n))
+            end
+        end
+    end
+    return indices
+end
+
+function full_indices(Np::Int, Ni::Int; single_tone::Bool=false)
+    indices = Tuple{Int, Int}[]
+    max_bound = max(Np, Ni)
+    for m in 0:max_bound
+        # If single_tone is true, we only care about m, n=0
+        range_n = single_tone ? (0:0) : (m == 0 ? 0 : -max_bound):max_bound
+        
+        for n in range_n
+            is_pump = (m <= Np && n == 0) || (m == 0 && abs(n) <= Np)
+            is_im = (m + abs(n) <= Ni)
+            if is_pump || is_im
+                push!(indices, (m, n))
+            end
+        end
+    end
+    return indices
+end
+
+function construct_fourier_basis(Np::Int, states::Vector{Num}; intermod_order=0, single_tone = false)
+    K = length(states)
+    @assert Np > 1 "Need at least one pump harmonic"
+    coeff_labels = 'A':'Z'
+    intermod_order > Np ? indices = diamond_truncation_indices(intermod_order) : indices = full_indices(Np, intermod_order, single_tone = single_tone)
+    #TODO: add optinal argument to remove DC term
+    N_terms = length(indices) - 1
+    dc_terms = @variables DC[1:K]
+    d_dc_terms = @variables d_DC[1:K]
+    #TODO: bigger system size
+    fourier_basis_map = Dict{Num, FourierBasis}()
+    @assert K < 13 "Have run out of letters in alphabet for state variables... will fix later"
+    for k in 1:K
+        cur_DC_term = DC[k]
+        cos_labels, sin_labels = Symbol(coeff_labels[2*k-1]), Symbol(coeff_labels[2*k])
+        cos_sym_arr = (@variables $cos_labels[1:N_terms])[1]
+        sin_sym_arr = (@variables $sin_labels[1:N_terms])[1]
+
+        cur_d_DC_term = d_DC[k]
+        d_cos_labels, d_sin_labels = Symbol('d' * coeff_labels[2*k-1]), Symbol('d' * coeff_labels[2*k])
+        d_cos_sym_arr = (@variables $d_cos_labels[1:N_terms])[1]
+        d_sin_sym_arr = (@variables $d_sin_labels[1:N_terms])[1]
+
+        #Create varaible map
+        index_map = Dict{Num,Tuple{Tuple{Int,Int},Symbol}}()
+        index_map[cur_DC_term] = (indices[1], :DC)
+        for n in 1:N_terms
+            index_map[cos_sym_arr[n]] = (indices[n+1], :Cos)
+            index_map[sin_sym_arr[n]] = (indices[n+1], :Sin)
+        end
+        cur_basis = FourierBasis(cur_DC_term, cur_d_DC_term, cos_sym_arr, sin_sym_arr, d_cos_sym_arr, d_sin_sym_arr, indices, index_map)
+        fourier_basis_map[states[k]] = cur_basis
+    end
+    return fourier_basis_map
+end

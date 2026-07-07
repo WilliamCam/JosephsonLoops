@@ -35,6 +35,12 @@ p1 = jls.plot(tsol[jls.C1.i][end-400:end].*I₀, title = "Transient Time Plot", 
 ω_vec = collect(2*pi*(4.5:0.001:5.0)*1e9/ωc)
 
 sweep_params = delete!(ps, jls.P1.source.ω)
+eqs, states, diffvars, diff2vars = jls.get_full_equations(model, jls.t)
+
+
+out = jls.harmonic_equation(eqs, Num.(states), jls.t, jls.P1.source.ω, 2, jac=true)
+
+dX_harmonic = expand_derivatives(jls.D(out[1]))
 
 sys = jls.HarmonicSystem(model, jls.P1.source.ω, 2)
 prob = jls.HarmonicProblem(sys, ω_vec, sweep_params)

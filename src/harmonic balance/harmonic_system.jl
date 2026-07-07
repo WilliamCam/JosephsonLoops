@@ -208,11 +208,8 @@ function HarmonicProblem(harmonic_system::HarmonicSystem, ω_values::Union{Float
      end
 end
 
-function HarmonicSystem(sys, ωvar::Num, N::Int; tearing::Bool=true, determine_jacobian::Bool=false)
-    #TODO:Check if this is actually true
+function HarmonicSystem(sys, ωvar::Union{Num,Tuple{Num,Num}}, N::Int; tearing::Bool=true, determine_jacobian::Bool=false)
 
-    # J0/J1 are built against the un-teared coefficient set, so keep tearing off when they
-    # are requested or the Jacobian columns won't line up with unknowns(system).
     determine_jacobian && (tearing = false)
 
     tvar = Num(ModelingToolkit.get_iv(sys))
@@ -222,9 +219,9 @@ function HarmonicSystem(sys, ωvar::Num, N::Int; tearing::Bool=true, determine_j
     eqs_arg    = length(states) == 1 ? eqs[1]         : eqs
     states_arg = length(states) == 1 ? Num(states[1]) : states
     if determine_jacobian
-        nonlinear_sys, X, variable_map, jac, X_dt = harmonic_equation(eqs_arg, states_arg, tvar, ωvar, N; jac=true)
+        nonlinear_sys, X, variable_map, jac = harmonic_equation(eqs_arg, states_arg, tvar, ωvar, N; jac=true)
     else
-        nonlinear_sys, X, variable_map, X_dt = harmonic_equation(eqs_arg, states_arg, tvar, ωvar, N)
+        nonlinear_sys, X, variable_map = harmonic_equation(eqs_arg, Num.(states_arg), tvar, ωvar, N)
         jac = nothing
     end
     
@@ -242,5 +239,5 @@ function HarmonicSystem(sys, ωvar::Num, N::Int; tearing::Bool=true, determine_j
     @named nonlinear_sys = NonlinearSystem(sys_eqs_built, sys_vars, parameters(sys))
     complete_sys = tearing ? mtkcompile(nonlinear_sys) : complete(nonlinear_sys)
 
-    return HarmonicSystem(complete_sys, sys, ωvar, N, X, X_dt, full_eqs, variable_map, jac)
+    return HarmonicSystem(complete_sys, sys, ωvar, N, X, full_eqs, variable_map, jac)
 end
