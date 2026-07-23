@@ -42,8 +42,8 @@ function get_HB_scattering_matrix(model::System,i::Char,j::Char)
     for k in N_ports
         port_k_sym = Symbol('P'*string(k))
         port_k = getproperty(model, port_k_sym)
-        a[k] = 0.5/sqrt(port_k.Rsrc.R)*(port_k.dθ*Φ₀/2π+port_k.Rsrc.R*port_k.i)
-        b[k] = 0.5/sqrt(port_k.Rsrc.R)*(port_k.dθ*Φ₀/2π-port_k.Rsrc.R*port_k.i)
+        a[k] = 0.5/sqrt(port_k.Rₙ.r)*(port_k.dφ+port_k.Rₙ.r*port_k.i)
+        b[k] = 0.5/sqrt(port_k.Rₙ.r)*(port_k.dφ-port_k.Rₙ.r*port_k.i)
     end
     return b / a
 end
@@ -67,20 +67,12 @@ function get_derivatives(X, t)
     return dXdt, d2Xdt2
 end
 
-function zero_harmonics(N, ω, t)
-    subs = Dict{Any, Any}()
-    for n in 1:(2N + 1)
-        subs[Symbolics.unwrap(cos(Num(n) * ω * t))] = 0.0
-        subs[Symbolics.unwrap(sin(Num(n) * ω * t))] = 0.0
-    end
-    return subs
-end
-
-function get_full_equations(model::ModelingToolkit.System, tvar::Num)
+function get_full_equations(model::ModelingToolkit.System)
     # copy: unknowns(model)/full_equations(model) return references into the model, and the
     # deleteat! calls below would otherwise mutate it (corrupting it for the next call).
     eqs = copy(full_equations(model))
     states = copy(unknowns(model))
+    tvar = ModelingToolkit.get_iv(model)
 
     diff2vars = Vector{Num}()
     diffvars = Vector{Num}()
@@ -211,20 +203,6 @@ function perturbation_response(h_sys::HarmonicSystem, source_param::Num, paramet
     return U
 end
 
-struct FourierBasis
-    dc_coeff::Num
-    d_dc_coeff::Num
-    cos_coeffs::Symbolics.Arr{Num, 1}
-    sin_coeffs::Symbolics.Arr{Num, 1}
-
-    # Symbolic first derivative variable e.g (d/dt A₁) needed for linearised jacobian J₁
-    d_cos_coeffs::Symbolics.Arr{Num, 1}
-    d_sin_coeffs::Symbolics.Arr{Num, 1}
-
-    fourier_indicies::Vector{Tuple{Int,Int}}
-    coeff_map::Dict{Num,Tuple{Tuple{Int,Int},Symbol}}
-end
-
 function diamond_truncation_indices(N::Int)
     indices = Tuple{Int, Int}[]
     for m in 0:N
@@ -280,11 +258,11 @@ function construct_fourier_basis(Np::Int, states::Vector{Num}; intermod_order=0,
         d_sin_sym_arr = (@variables $d_sin_labels[1:N_terms])[1]
 
         #Create varaible map
-        index_map = Dict{Num,Tuple{Tuple{Int,Int},Symbol}}()
-        index_map[cur_DC_term] = (indices[1], :DC)
+        index_map = Dict{Tuple{Tuple{Int,Int},Symbol}, Num}()
+        index_map[(indices[1], :DC)] = cur_DC_term
         for n in 1:N_terms
-            index_map[cos_sym_arr[n]] = (indices[n+1], :Cos)
-            index_map[sin_sym_arr[n]] = (indices[n+1], :Sin)
+            index_map[(indices[n+1], :Cos)] = cos_sym_arr[n]
+            index_map[(indices[n+1], :Sin)] = sin_sym_arr[n]
         end
         cur_basis = FourierBasis(cur_DC_term, cur_d_DC_term, cos_sym_arr, sin_sym_arr, d_cos_sym_arr, d_sin_sym_arr, indices, index_map)
         fourier_basis_map[states[k]] = cur_basis

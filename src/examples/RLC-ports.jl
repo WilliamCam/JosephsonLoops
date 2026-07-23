@@ -1,6 +1,6 @@
 
-using Revise
 using JosephsonLoops
+using Revise
 using Symbolics
 using ModelingToolkit
 using BenchmarkTools
@@ -35,21 +35,15 @@ p1 = jls.plot(tsol[jls.C1.i][end-400:end].*I₀, title = "Transient Time Plot", 
 ω_vec = collect(2*pi*(4.5:0.001:5.0)*1e9/ωc)
 
 sweep_params = delete!(ps, jls.P1.source.ω)
-eqs, states, diffvars, diff2vars = jls.get_full_equations(model, jls.t)
-
-
-out = jls.harmonic_equation(eqs, Num.(states), jls.t, jls.P1.source.ω, 2, jac=true)
-
-dX_harmonic = expand_derivatives(jls.D(out[1]))
 
 sys = jls.HarmonicSystem(model, jls.P1.source.ω, 2)
-prob = jls.HarmonicProblem(sys, ω_vec, sweep_params)
+prob = jls.HarmonicProblem(sys, sweep_params, parameter_sweep = [jls.P1.source.ω=>ω_vec])
 
 result = jls.solve!(prob)
-out = prob.result.solution[jls.P1.source.ω]
 
-current = jls.get_output(prob, result, jls.P1.i, 1)
-theta_p_mag = jls.get_output(prob, result, jls.P1.dφ,  1)
+current = jls.get_solution(prob, jls.P1.i, 1)
+theta_p_mag =  jls.get_solution(prob, jls.P1.dφ, 1)
+
 
 Ii = @. current*I₀
 Vi = @. (theta_p_mag)*R₀*I₀
@@ -59,10 +53,16 @@ ai = @. 0.5 * (Vi + Z0 * Ii) / sqrt(Z0)
 bi = @. 0.5 * (Vi - Z0 * Ii) / sqrt(Z0)
 p = jls.plot(ω_vec/(2*pi), 20*log10.(abs.(bi./ai)), xlabel="Frequency (Hz)", ylabel="S11 (dB)", title="RLC S-Parameter", lw=2)
 
-#  Linear (small-signal) analysis around a pump tone — mirrors the JPA example in MIT's
-#  JosephsonCircuits.jl (port ∥ 50Ω, series Cc=100fF, junction Lj=1nH ∥ Cj=1000fF).
 sys = jls.HarmonicSystem(model, jls.P1.source.ω, 2, determine_jacobian=true)
 
+s11_expr = jls.get_HB_scattering_matrix(model, '1', '1')[1]
+test = jls.get_solution(prob, s11_expr, (1,0))
+
+
+
+plot(abs.(test))
+
+using Plots
 ωp = 2*pi*4.75001e9./ωc
 δI = 11.3e-9/I₀
 
@@ -92,8 +92,6 @@ p_mag = jls.plot(Ω_vec/(2*pi*1e9), 20*log10.(abs.(S11)),
     xlabel="Frequency (GHz)", ylabel="|S₁₁| (dB)",
     title="JPA gain — JosephsonLoops vs JosephsonCircuits.jl",
     lw=2, label="JosephsonLoops", legend=:topright)
-
-
 
 # Overlay JosephsonCircuits.jl. First generate the CSV once, from the MIT project:
 #   cd ../JosephsonCircuits-MIT/JosephsonCircuits.jl

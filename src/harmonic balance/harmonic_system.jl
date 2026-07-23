@@ -4,73 +4,90 @@ using NonlinearSolve
 using BenchmarkTools
 using StaticArrays
 
+struct FourierBasis
+    dc_coeff::Num
+    d_dc_coeff::Num
+    cos_coeffs::Symbolics.Arr{Num, 1}
+    sin_coeffs::Symbolics.Arr{Num, 1}
+
+    # Symbolic first derivative variable e.g (d/dt A₁) needed for linearised jacobian J₁
+    d_cos_coeffs::Symbolics.Arr{Num, 1}
+    d_sin_coeffs::Symbolics.Arr{Num, 1}
+
+    fourier_indicies::Vector{Tuple{Int,Int}}
+    coeff_map::Dict{Tuple{Tuple{Int,Int},Symbol}, Num}
+end
+
 struct HarmonicSystem
     system::ModelingToolkit.AbstractSystem
     time_domain_system::ModelingToolkit.System
-    ω::Num
+    ω::Tuple{Num,Num} # (ωp, ωs)
     N::Int
     harmonic_ansatz::Vector{Num}
-    harmonic_ansatz_dt::Any   # per-state d/dt of the ansatz, cached from harmonic_equation (reused by reconstruct)
-    full_eqs::Any
-    variable_map::Dict{Tuple{Any, Int, Symbol}, Num}
+    variable_map::Dict{Num, FourierBasis}
     jacobian::Union{Tuple{Matrix{Num}, Matrix{Num}},Nothing}
 end
 
 struct HarmonicResult
-    solution::Dict{Num, AbstractArray}
+    dependent_parameters::Union{Num,Vector{Num}}
+    solution::AbstractArray
     #TODO: add retcodes
 end
 
 struct HarmonicProblem
     harmonic_system::HarmonicSystem
     problem::NonlinearSolve.NonlinearProblem
-    ω_sweep::Tuple{Num, Union{Float64,Vector{Float64}}}
     parameters::Dict
-    parameter_sweep::Union{Dict{Num, Vector{Float64}},Nothing}
+    parameter_sweep::Union{Vector{Pair{Num, Vector{Float64}}}, Nothing}
     U₀::Vector{Float64}
     result::HarmonicResult
 end
 
+
 struct LinearisedProblem
     harmonic_system::HarmonicSystem
     jacobian::Tuple{Matrix{Num},Matrix{Num}}
-    ω_sweep::Tuple{Num, Union{Float64,Vector{Float64}}}
+    Ωs::Union{Float64,Vector{Float64}}
+    Ωp::Union{Float64,Vector{Float64}}
     parameters::Dict
     parameter_sweep::Union{Dict{Num, Vector{Float64}},Nothing}
-    working_point::Dict{Num, Float64}
-    ω_pump::Float64
-    U_perturbation::Vector{ComplexF64}
+    δU::Union{ComplexF64,Vector{ComplexF64}}
     result::HarmonicResult
 end
 
 function solve!(harmonic_problem::HarmonicProblem; continuation::Bool = true, kwargs...)
-    result = harmonic_problem.result
+    result = harmonic_problem.result.solution
     nonlinear_prob = harmonic_problem.problem
-    ω, ω_values = harmonic_problem.ω_sweep
+    sweep_space = harmonic_problem.parameter_sweep
+    continuation_axis = 1
 
-    if isnothing(harmonic_problem.parameter_sweep)
-        println("Performing sweep $(ω) over $(length(ω_values)) points...")
-        output_array = result.solution[ω]
-        print(typeof(output_array))
-        working_prob = remake(nonlinear_prob; u0 = harmonic_problem.U₀, p = [ω => first(ω_values)])
-    
-        _nl_solve_method!(output_array, working_prob, ω, ω_values, continuation=continuation)
+    working_prob = remake(nonlinear_prob; u0 = harmonic_problem.U₀)
+
+    if isnothing(sweep_space)
+        sol = ModelingToolkit.solve(working_prob, kwargs...)
+        result[:] .= sol.u
     else
-        for param_sweep in harmonic_problem.parameter_sweep
-            sweep_parameter = param_sweep.first
-            sweep_values = param_sweep.second
+        param_keys = [sweep_space[d].first for d in eachindex(sweep_space)]
+        update_parameters! = ModelingToolkit.setp(working_prob, param_keys)
+        param_space = CartesianIndices(axes(result)[2:end])
+        for cart_index in param_space
+            current_params = [sweep_space[axis].second[cart_index[axis]] for axis in eachindex(sweep_space)]
 
-            println("Performing 2D Sweep $(sweep_parameter) over $(length(ω_values)*length(sweep_values)) points...")
-
-            output_array = result.solution[sweep_parameter]
-            #output array indexed as [state_variable, parameter_value, ω_value]
-
-            working_prob = remake(nonlinear_prob; u0 = harmonic_problem.U₀, p = [sweep_parameter => first(sweep_values)])
-            #TODO: This should be made into a parallel Ensemble sweep using DiffEq.jl
-            for (parameter_index,_val) in enumerate(sweep_values)
-                working_prob.ps[sweep_parameter] = _val
-                _nl_solve_method!(output_array, working_prob, ω, ω_values, continuation=continuation, parameter_index = parameter_index)
+            if cart_index[continuation_axis] == 1 && cart_index != first(param_space)
+                _cont_step = false
+                print("Paused continuation")
+            else
+                _cont_step = continuation
             end
+  
+            update_parameters!(working_prob, current_params)
+            #TODO: This should be made into a parallel Ensemble sweep using DiffEq.jl
+            sol = ModelingToolkit.solve(working_prob, kwargs...)
+            for var_idx in axes(result, 1)
+                full_idx = CartesianIndex(var_idx, cart_index.I...)
+                result[full_idx] = sol.u[var_idx]
+            end
+            _cont_step ? working_prob.u0 .= sol.u : working_prob.u0 .= harmonic_problem.U₀
         end
     end
 
@@ -123,10 +140,7 @@ function solve!(linear_problem::LinearisedProblem)
     return result
 end
 
-# Solve (J₀ - iδJ₁)·resp = U. A coefficient that appears in no equation (e.g. the DC phase
-# of a capacitor, which only enters through D²θ) leaves an exactly-zero jacobian column,
-# making the matrix gauge-singular; fall back to the minimum-norm solution, which pins the
-# free coefficient's response to 0 — the physically sensible gauge.
+
 function _linear_solve(mat::AbstractMatrix, U::AbstractVector, warn_once::Bool)
     F = LinearAlgebra.lu(mat; check = false)
     LinearAlgebra.issuccess(F) && return F \ U
@@ -134,12 +148,12 @@ function _linear_solve(mat::AbstractMatrix, U::AbstractVector, warn_once::Bool)
     return LinearAlgebra.pinv(mat) * U
 end
 
-function _nl_solve_method!(prealloc_array::Array{ComplexF64}, problem::NonlinearSolve.NonlinearProblem, ω_variable::Num, ω_sweep_values::Union{Float64, Vector{Float64}}; 
-    continuation::Bool=true, parameter_index::Int = 0, kwargs...
+function _nl_solve_method!(prealloc_array::Array{ComplexF64}, problem::NonlinearSolve.NonlinearProblem, sweep_parameter::Num, sweep_values::Union{Float64, Vector{Float64}}; 
+    continuation::Bool=true, parameter_index::Union{Int, Vector{Int}}, kwargs...
         )
-    for (column_index, frequency) in enumerate(ω_sweep_values)
+    for (column_index, val) in enumerate(sweep_values)
 
-        problem.ps[ω_variable] = frequency
+        problem.ps[sweep_parameter] = val
 
         #TODO: Benchmark allocations for performance
         sol = ModelingToolkit.solve(problem, kwargs...)
@@ -148,36 +162,33 @@ function _nl_solve_method!(prealloc_array::Array{ComplexF64}, problem::Nonlinear
             problem.u0 .= sol.u
         end
         if parameter_index != 0
-            prealloc_array[:, parameter_index, column_index] .= sol.u
+            prealloc_array[:, parameter_index..., column_index] .= sol.u
         else
             prealloc_array[:, column_index] .= sol.u
         end
     end
 end
 
-function HarmonicProblem(harmonic_system::HarmonicSystem, ω_values::Union{Float64, Vector{Float64}}, parameters::Dict; 
-        parameter_sweep::Union{Dict{Num, Vector{Float64}}, Nothing}=nothing, 
+function HarmonicProblem(harmonic_system::HarmonicSystem, parameters::Dict; 
+        parameter_sweep::Union{Vector{Pair{Num, Vector{Float64}}}, Nothing}=nothing, 
         U₀::Union{Vector{Float64},Nothing} = nothing, 
-        linear_response::Union{Tuple{Float64,<:AbstractVector},Nothing} = nothing,
         kwargs...
     )
     system = harmonic_system.system
-    ωvar = harmonic_system.ω
-    ω_sweep = (ωvar, ω_values)
     system_unknowns = unknowns(system)
-    isnothing(linear_response) || !isnothing(harmonic_system.jacobian) ||
-        error("linear_response requires a HarmonicSystem built with determine_jacobian=true")
-    _Nvars = isnothing(linear_response) ? length(system_unknowns) : size(harmonic_system.jacobian[1], 1)
-
+    _Nvars = length(system_unknowns)
+    results_size = [_Nvars]
+    dep_params = Num[]
     #Preallocate results object
-    if isnothing(parameter_sweep)
-        result_dict = Dict{Num, Array{ComplexF64}}(ωvar => Array{ComplexF64}(undef, _Nvars, length(ω_values)))
-    else
-        keys_list = collect(keys(parameter_sweep))
-        _get_result_size(parameter::Num) = (_Nvars, length(parameter_sweep[parameter]), length(ω_values)) 
-        result_dict = Dict{Num, Array{ComplexF64}}(key => Array{ComplexF64}(undef, _get_result_size(key)...) for key in keys_list)
+    if !isnothing(parameter_sweep)
+        for sweep in parameter_sweep
+            sweep_param, vals = sweep
+            results_size = vcat(results_size, length(vals))
+            append!(dep_params, sweep_param)
+        end
     end
-    output = HarmonicResult(result_dict)
+    result_arr = Array{ComplexF64}(undef,results_size...) 
+    output = HarmonicResult(dep_params, result_arr)
 
     #Determine inital condition state vector
     if isnothing(U₀)  
@@ -187,46 +198,71 @@ function HarmonicProblem(harmonic_system::HarmonicSystem, ω_values::Union{Float
     #Initialise NonlinearProblem
     system_parameters = merge(Dict(system_unknowns .=> U₀), parameters)
     nonlinear_prob = NonlinearProblem(system, system_parameters)
-    if isnothing(linear_response)
-        return HarmonicProblem(harmonic_system, nonlinear_prob, ω_sweep, parameters, parameter_sweep, U₀, output)
-    else
-        #TODO: Assert jacobian is generated for linear response
-        pump_frequency, perturbation = linear_response
-        working_prob = remake(nonlinear_prob; u0 = U₀, p = [harmonic_system.ω => pump_frequency])
-        sol = ModelingToolkit.solve(working_prob, kwargs...)
-        working_point = Dict(
-            key => begin
-                try
-                    sol[key]
-                catch e
-                    0.0
-                end
-            end 
-            for key in values(harmonic_system.variable_map)
-        )
-        return LinearisedProblem(harmonic_system, harmonic_system.jacobian, ω_sweep, parameters, parameter_sweep, working_point, pump_frequency, ComplexF64.(perturbation), output)
-     end
+
+    return HarmonicProblem(harmonic_system, nonlinear_prob, parameters, parameter_sweep, U₀, output)
 end
 
-function HarmonicSystem(sys, ωvar::Union{Num,Tuple{Num,Num}}, N::Int; tearing::Bool=true, determine_jacobian::Bool=false)
+function LinearisedProblem(harmonic_system::HarmonicSystem, parameters::Dict,
+    δU::AbstractVector; 
+    parameter_sweep::Union{Dict{Num, Vector{Float64}}, Nothing}=nothing, 
+    U₀::Union{Vector{Float64},Nothing} = nothing,
+    kwargs...)
+    @assert !isnothing(harmonic_system.jacobian) "Linearised problem requires a harmonic system with determined jacobian"
 
+    system = harmonic_system.system
+    ωp, ωs = harmonic_system.ω
+    system_unknowns = unknowns(system)
+    _Nvars = size(harmonic_system.jacobian[1], 1)
+    results_size = [_Nvars]
+    #Preallocate results object
+    key_map = Dict{Num,Int}()
+    if !isnothing(parameter_sweep)
+        if has_key(parameter_sweep, ωs)
+            Ωs = pop!(parameter_sweep, ωs)
+            results_size = vcat(results_size, length(Ωs))
+        end
+        if has_key(parameter_sweep, ωp)
+            Ωp = pop!(parameter_sweep, ωp)
+            results_size = vcat(results_size, length(Ωp))
+        end
+
+        keys_list = collect(keys(parameter_sweep))
+        for (sweep_key, index) in enumerate(keys_list)
+            results_size = vcat(result_size, length(parameter_sweep[sweep_key]))
+            key_map[sweep_key] = index
+        end
+    else
+        Ωp = parameters[ωp]
+        Ωs = parameters[ωs]
+    end
+    result_arr = Array{ComplexF64}(undef,results_size...)
+    output = HarmonicResult(key_map, result_arr)
+
+    #Determine inital condition state vector
+    if isnothing(U₀)  
+        U₀ = fill(0.0, length(unknowns(system)))
+    end
+    return LinearisedProblem(harmonic_system, harmonic_system.jacobian, Ωp, Ωs, parameters, parameter_sweep, ComplexF64.(δU), output)
+end
+
+#TODO:: LinearisedProbelm(::HarmonicProblem)
+
+function HarmonicSystem(sys, ω::Union{Num,Tuple{Num,Num}}, N::Int; tearing::Bool=true, determine_jacobian::Bool=false)
+    if typeof(ω) !== Tuple
+        ω = (ω, Num(0))
+    end
     determine_jacobian && (tearing = false)
 
     tvar = Num(ModelingToolkit.get_iv(sys))
-    eqs, states, diffvars, diff2vars = get_full_equations(sys, tvar)
-    full_eqs = (; eqs, states, diffvars, diff2vars)   
+    eqs, states, _, _ = get_full_equations(sys)
 
     eqs_arg    = length(states) == 1 ? eqs[1]         : eqs
     states_arg = length(states) == 1 ? Num(states[1]) : states
-    if determine_jacobian
-        nonlinear_sys, X, variable_map, jac = harmonic_equation(eqs_arg, states_arg, tvar, ωvar, N; jac=true)
-    else
-        nonlinear_sys, X, variable_map = harmonic_equation(eqs_arg, Num.(states_arg), tvar, ωvar, N)
-        jac = nothing
-    end
+    nonlinear_sys, X, variable_map, jac = harmonic_equation(eqs_arg, Num.(states_arg), tvar, ω, N; jac=determine_jacobian) 
     
     sys_eqs, sys_vars = equations(nonlinear_sys), unknowns(nonlinear_sys)
     
+    #TODO: Remove the correct equation
     if length(sys_eqs) > length(sys_vars)
         n_drop = length(sys_eqs) - length(sys_vars)
         @warn "Harmonic system is overdetermined: $(length(sys_eqs)) equations for $(length(sys_vars)) variables. " *
@@ -234,10 +270,10 @@ function HarmonicSystem(sys, ωvar::Union{Num,Tuple{Num,Num}}, N::Int; tearing::
         sys_eqs = sys_eqs[1:end-n_drop]
     end
         
-    sys_eqs_built = tearing ? sys_eqs : [0 ~ eq.lhs - eq.rhs for eq in sys_eqs]
+    built_equations = tearing ? sys_eqs : [0 ~ eq.lhs - eq.rhs for eq in sys_eqs]
 
-    @named nonlinear_sys = NonlinearSystem(sys_eqs_built, sys_vars, parameters(sys))
+    @named nonlinear_sys = NonlinearSystem(built_equations, sys_vars, parameters(sys))
     complete_sys = tearing ? mtkcompile(nonlinear_sys) : complete(nonlinear_sys)
 
-    return HarmonicSystem(complete_sys, sys, ωvar, N, X, full_eqs, variable_map, jac)
+    return HarmonicSystem(complete_sys, sys, ω, N, X, variable_map, jac)
 end

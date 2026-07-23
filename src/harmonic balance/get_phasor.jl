@@ -1,9 +1,4 @@
-# Extracts the numeric phasor Aₙ + iBₙ from a harmonic-balance result for some order in ω.
-using ModelingToolkit
 
-# Repeatedly substitute `subs` into `expr` until it stops changing. Observed equations can
-# reference other observed equations, so a single pass may not fully flatten the result.
-# `transform` is applied after each substitution (e.g. expand_derivatives).
 function substitute_to_fixpoint(expr, subs; max_iters = 20, transform = identity)
     for _ in 1:max_iters
         next = transform(Symbolics.substitute(expr, subs))
@@ -13,9 +8,31 @@ function substitute_to_fixpoint(expr, subs; max_iters = 20, transform = identity
     return expr
 end
 
-function get_output(h_prob::HarmonicProblem, result::HarmonicResult, var::Num, order::Int = 1)
-    expression = get_harmonic_expression(h_prob.harmonic_system, var, order)
-    return apply_harmonic_expression(h_prob, result, expression)
+function get_solution(h_prob::HarmonicProblem, expression::Num, order::Union{Int,Tuple{Int,Int}} = 1;
+    time_domain_solution::Bool = false)
+    expr_vars = Num.(get_variables(expression))
+    if time_domain_solution
+        order = nothing
+    end
+    if length(expr_vars) > 1
+        sub_dict = Dict{Num,Num}()
+        for var in expr_vars
+            #TODO assert var is in parameters or observed or states
+            if var_is_in(parameters(h_prob.harmonic_system.system), var)
+                continue
+            end
+            harmonic_var = expression_for_var(h_prob.harmonic_system, var, order)
+            sub_dict[var] = harmonic_var
+        end
+        harmonic_expr = substitute(expression, sub_dict)
+    else
+        harmonic_expr = expression_for_var(h_prob.harmonic_system, expression, order)
+    end
+    harmonic_expr = simplify(expand(harmonic_expr))
+    sol = h_prob.result.solution
+    output_arr = Array{ComplexF64}(undef, size(sol)[2:end]...)
+    apply_harmonic_expression!(output_arr, h_prob, harmonic_expr)
+    return output_arr
 end
 
 # Small-signal response phasor of `var` (the variable symbol) at the requested order. The harmonic system
@@ -31,51 +48,89 @@ function get_output(h_sys::HarmonicSystem, lin_prob::LinearisedProblem, result::
 end
 
 #  Harmonic expressions
+"""
+Retrieves the expression for target harmonic specified to some order by either pulling directly from
+the state variables via h_sys.variable_map, or by using reconstruct_from_observed() if the the target variable 'var'
+was removed via system tearing in MTK.structural_simplify().
 
-function get_harmonic_expression(h_sys::HarmonicSystem, var::Num, order::Int)
-    variable_map = h_sys.variable_map
-    var_symbol = Symbolics.unwrap(var)  
-    if order == 0
-        phasor_re = get(variable_map, (var_symbol, 0, :Cos), nothing)
-        phasor_re === nothing && (phasor_re = reconstruct_from_observed(h_sys, var, 0, :Cos))
-        return phasor_re, Num(0.0)
+Order is a tuple that specifies the fourier indicies of the harmonic ansatz in the format (ωp,ωs). i.e. (2,-1) will return 
+the expression for the coefficient of the (2*ωp - ωs)*t term in the solution for var
+
+If no order specified returns the full expression (i.e. all fourier components of expanded solution)
+"""
+function expression_for_var(h_sys::HarmonicSystem, var::Num, order::Union{Int,Tuple{Int,Int},Nothing})
+    if typeof(order)==Int
+        order = (order, 0)
     end
-    phasor_re = get(variable_map, (var_symbol, order, :Cos), nothing)
-    phasor_im = get(variable_map, (var_symbol, order, :Sin), nothing)
-    phasor_re === nothing && (phasor_re = reconstruct_from_observed(h_sys, var, order, :Cos))
-    phasor_im === nothing && (phasor_im = reconstruct_from_observed(h_sys, var, order, :Sin))
-    return phasor_re, phasor_im
+    _, states, _, _ = get_full_equations(h_sys.time_domain_system)
+   
+    if var_is_in(states, var)
+        state_index = var_index(states, Symbolics.unwrap(var))
+        expr = h_sys.harmonic_ansatz[state_index]
+    else
+        expr = reconstruct_from_observed(h_sys, var)
+    end
+    if order !== nothing
+        pump_index, signal_index = order
+        ωp, ωs = h_sys.ω
+        I = Symbolics.coeff(expr, cos((pump_index * ωp + signal_index * ωs)*t))
+        Q = Symbolics.coeff(expr, sin((pump_index * ωp + signal_index * ωs)*t)) 
+        return Num.(I + 1im*Q)
+    else
+        return Num.(expr)
+    end
 end
 
-get_harmonic_expression(h_prob::HarmonicProblem, var::Num, order::Int) =
-    get_harmonic_expression(h_prob.harmonic_system, var, order)
 
-# Compile the symbolic phasor and evaluate it at every ω point. The expression is reduced
-# to the system unknowns and ω, then mapped over the solved `[unknown × ω point]` array.
-function apply_harmonic_expression(h_prob::HarmonicProblem, result::HarmonicResult, expression::Tuple{Num,Num})
-    system = h_prob.harmonic_system.system
-    isnothing(h_prob.parameter_sweep) || error("get_output supports ω-only sweeps")
-    ω, ω_values = h_prob.ω_sweep
-    ω_vec = ω_values isa Number ? [Float64(ω_values)] : ω_values
+function reconstruct_from_observed(h_sys::HarmonicSystem, observed_var::Num)
+    hs = h_sys
+    #TODO: Are the observed equations of the harmonic system (i.e. observed(hs.system)) necessary ?
+    observed_map = Dict{Any, Any}(Symbolics.unwrap(eq.lhs) => Symbolics.unwrap(eq.rhs)
+                                  for sys in (hs.time_domain_system, hs.system) for eq in observed(sys))
+    var_symbol = Symbolics.unwrap(observed_var)
+    target_rhs = get(observed_map, var_symbol, nothing)
+    target_rhs === nothing && error("Variable $var not found in observed equations")
 
-    #TODO: functionality for parameter sweeps
-    solution = result.solution[ω]
-    input_syms = Symbolics.unwrap.(unknowns(system))
-
-    #A bit unsure if this is computationally efficient, need to ask will - ai suggested
-    #if its purely a state then you just grab the cos/sin rows from sol array, otherwise compile
-    cos_row = findfirst(x -> isequal(x, Symbolics.unwrap(expression[1])), input_syms)
-    sin_row = findfirst(x -> isequal(x, Symbolics.unwrap(expression[2])), input_syms)
-    if cos_row !== nothing && sin_row !== nothing
-        return complex.(real.(solution[cos_row, :]), real.(solution[sin_row, :]))
+    flat_subs = Dict(k => v for (k, v) in observed_map if !(Symbolics.symtype(k) <: AbstractArray))
+    expr = substitute_to_fixpoint(target_rhs, flat_subs; transform = Symbolics.expand_derivatives)
+    (_, states, diffvars, diff2vars) = get_full_equations(hs.time_domain_system)
+    ansatz_subs = Dict{Any, Any}()
+    for (k, s) in enumerate(states)
+        ansatz_subs[Symbolics.unwrap(s)] = Symbolics.unwrap(hs.harmonic_ansatz[k])
+    end
+    for (i, dv) in enumerate(diff2vars)
+        k = var_index(states, Symbolics.unwrap(diffvars[i]))
+        ansatz_subs[Symbolics.unwrap(dv)] = Symbolics.unwrap(Symbolics.expand_derivatives(D(hs.harmonic_ansatz[k]))) 
     end
 
-    f_re, f_im = compile_phasor(expression, input_syms, h_prob.parameters, system, ω)
+    reconstructed_expr = Num(Symbolics.expand(Symbolics.substitute(expr, ansatz_subs)))
+    return simplify(reconstructed_expr)
+end
 
-    # Harmonic-balance solutions are real; evaluate both coefficients at the solved state.
-    return map(axes(solution, 2)) do i
-        input_vec = real.([solution[:, i]; ω_vec[i]])
-        complex(f_re(input_vec), f_im(input_vec))
+
+function apply_harmonic_expression!(output::AbstractArray, h_prob::HarmonicProblem, expression::Complex{Num})
+    system = h_prob.harmonic_system.system
+    result = h_prob.result.solution
+    sweep = h_prob.parameter_sweep
+    sweep_params = h_prob.result.dependent_parameters
+    if !isnothing(sweep)
+        output_func = compile_expression(expression, system, h_prob.parameters, sweep_parameters = sweep_params)
+        input_vec = similar(result, size(result, 1) + length(sweep))
+        state_len = size(result, 1)
+
+        @views for (linear_idx, cart_index) in enumerate(CartesianIndices(axes(result)[2:end]))
+
+            input_vec[1:state_len] .= result[:, cart_index]
+
+            for (idx, param_sweep) in enumerate(sweep)
+                p_vals = last(param_sweep)
+                input_vec[state_len + idx] = p_vals[linear_idx]
+            end
+
+            output[cart_index] = output_func(input_vec)
+        end
+    else
+        print("Non sweep output")
     end
 end
 
@@ -116,60 +171,17 @@ function apply_harmonic_expression(h_sys::HarmonicSystem, lin_prob::LinearisedPr
     end
 end
 
-# Shared compile step: reduce both coefficient expressions to `input_syms` plus ω and
-# build callable functions.
-#   observed_subs — observed equations, skipping whole-array reconstructions
-#     (mtkcompile's `E => change_origin(...)`) that would become uncompilable; and
-#   fixed_params  — every parameter value in `parameter_values` except the swept ω.
-function compile_phasor(expression::Tuple{Num,Num}, input_syms, parameter_values, system, ω)
+function compile_expression(expr::Complex{Num}, system::ModelingToolkit.System, parameter_values::Dict{Num,Float64};
+        sweep_parameters::Vector{Num} = [Num(nothing)]
+    )
+    input_syms = Symbolics.unwrap.(unknowns(system))
     observed_subs = Dict(eq.lhs => eq.rhs for eq in observed(system)
                          if !(Symbolics.symtype(Symbolics.unwrap(eq.lhs)) <: AbstractArray))
     fixed_params = Dict(Num(p) => Float64(parameter_values[Num(p)]) for p in parameters(system)
-                        if !isequal(Num(p), ω) && haskey(parameter_values, Num(p)))
-
-    inputs = vcat(input_syms, Symbolics.unwrap(ω))
-    compile(expr) = Symbolics.build_function(
+                        if !var_is_in(sweep_parameters, Num(p)) && haskey(parameter_values, Num(p)))
+    inputs = vcat(input_syms, Symbolics.unwrap.(sweep_parameters)...)
+    compiled_function = Symbolics.build_function(
         Symbolics.unwrap(Symbolics.substitute(substitute_to_fixpoint(expr, observed_subs), fixed_params)),
         inputs; expression = Val{false})
-    return compile(expression[1]), compile(expression[2])
+    return compiled_function
 end
-
-#  Observed-variable reconstruction
-
-# Rebuild the harmonic coefficient of an observed (non-state) variable: flatten its
-# defining equation down to the original states, substitute each state's harmonic ansatz,
-# then read off the requested cos/sin coefficient.
-function reconstruct_from_observed(h_sys::HarmonicSystem, var::Num, order::Int, component::Symbol)
-    hs = h_sys
-    t  = ModelingToolkit.get_iv(hs.time_domain_system)
-    observed_map = Dict{Any, Any}(Symbolics.unwrap(eq.lhs) => Symbolics.unwrap(eq.rhs)
-                                  for sys in (hs.time_domain_system, hs.system) for eq in observed(sys))
-
-    var_symbol = Symbolics.unwrap(var)
-    target_rhs = get(observed_map, var_symbol, nothing)
-    target_rhs === nothing && error("Variable $var not found in observed equations")
-
-    flat_subs = Dict(k => v for (k, v) in observed_map if !(Symbolics.symtype(k) <: AbstractArray))
-    expr = substitute_to_fixpoint(target_rhs, flat_subs; transform = Symbolics.expand_derivatives)
-    (; states, diffvars, diff2vars) = hs.full_eqs   # cached 
-    ansatz_subs = Dict{Any, Any}()
-    for (k, s) in enumerate(states)
-        ansatz_subs[Symbolics.unwrap(s)] = Symbolics.unwrap(hs.harmonic_ansatz[k])
-    end
-    for (i, dv) in enumerate(diff2vars)
-        k = var_index(states, Symbolics.unwrap(diffvars[i]))
-        ansatz_subs[Symbolics.unwrap(dv)] = Symbolics.unwrap(hs.harmonic_ansatz_dt[k])   # cached 
-    end
-
-    substituted = Num(Symbolics.expand(Symbolics.substitute(expr, ansatz_subs)))
-
-    if order == 0
-        return Num(Symbolics.substitute(Symbolics.unwrap(substituted), zero_harmonics(hs.N, hs.ω, t)))
-    end
-
-    basis = component == :Cos ? cos(Num(order) * hs.ω * t) : sin(Num(order) * hs.ω * t)
-    return Num(Symbolics.coeff(substituted, basis))
-end
-
-reconstruct_from_observed(h_prob::HarmonicProblem, var::Num, order::Int, component::Symbol) =
-    reconstruct_from_observed(h_prob.harmonic_system, var, order, component)

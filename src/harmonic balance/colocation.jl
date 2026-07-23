@@ -84,7 +84,7 @@ function harmonic_solution_symbolic_derrivative(fourier_basis::FourierBasis, ω1
     return dX, d2X
 end
 
-function harmonic_equation(eqs::Vector{Equation}, states::Vector{Num}, tvar::Num, ω::Union{Num, Tuple{Num,Num}}, N::Int; 
+function harmonic_equation(eqs::Vector{Equation}, states::Vector{Num}, tvar::Num, ω::Union{Tuple{Num,Num}}, N::Int; 
         jac=false, intermod_oder = 0)
 
     M = length(states)
@@ -94,8 +94,8 @@ function harmonic_equation(eqs::Vector{Equation}, states::Vector{Num}, tvar::Num
     @assert (M == length(eqs)) "System does not have the same number of equations as state variables"
     @assert length(ω) <= 2 "maximum of two tones supported"
 
-    length(ω)>1 ? (ω1, ω2) = ω : (ω1, ω2) = (ω, Num(0))
-    single_tone = length(ω)==1
+    ω1, ω2 = ω
+    single_tone = ω2 ==Num(0)
 
     basis_map = construct_fourier_basis(N, states, intermod_order = intermod_oder, single_tone = single_tone)
     N_terms = length(basis_map[states[1]].fourier_indicies)
@@ -139,10 +139,11 @@ function harmonic_equation(eqs::Vector{Equation}, states::Vector{Num}, tvar::Num
     if jac
         d_harmonic_eqs = substitute(eqs, jac_subs)
     end
-    single_tone ? Nt = 2*N + 1 : Nt = (2*N+1) * (2*N+1)
+    #single_tone ? Nt = 2*N + 1 : Nt = (2*N+1) * (2*N+1)
+    Nt = 2*N_terms-1
     for k in 1:M
         res_expr = Symbolics.simplify(harmonic_eqs[k].lhs - harmonic_eqs[k].rhs)
-        single_tone ? sample_collocation_grid!(residuals, Nt, res_expr, ω1, tvar) : sample_collocation_grid_2D!(residulas, Nt, Nt, res_expr, ω1, ω2, tvar)
+        single_tone ? sample_collocation_grid!(residuals, Nt, res_expr, ω1, tvar) : sample_collocation_grid_2D!(residuals, Nt, Nt, res_expr, ω1, ω2, tvar)
         if jac
             d_res_expr = Symbolics.simplify(d_harmonic_eqs[k].lhs - d_harmonic_eqs[k].rhs)
             single_tone ? sample_collocation_grid!(d_residuals, Nt, d_res_expr, ω1, tvar) : sample_collocation_grid_2D!(d_residulas, Nt, Nt, d_res_expr, ω1, ω2, tvar)
@@ -154,7 +155,6 @@ function harmonic_equation(eqs::Vector{Equation}, states::Vector{Num}, tvar::Num
         J0, J1 = build_jacobians(rotated_system, vars, dvars)
         return sys, X, basis_map, (J0, J1)
     else
-        return sys, X, basis_map
+        return sys, X, basis_map, nothing
     end
 end
-
