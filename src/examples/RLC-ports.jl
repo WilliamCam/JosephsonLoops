@@ -22,7 +22,8 @@ ps = Dict(
     jls.P1.Rₙ.r => 50.0/R₀,
     jls.C1.βc => 100.0e-15*R₀*ωc,
     jls.J1.βc => 1000.0e-15*R₀*ωc,
-    jls.J1.r => 1e8/R₀
+    jls.J1.r => 1e8/R₀,
+    jls.J1.α => 1.0
 )
 
 #time domain simulation 
@@ -58,26 +59,29 @@ sys = jls.HarmonicSystem(model, jls.P1.source.ω, 2, determine_jacobian=true)
 s11_expr = jls.get_HB_scattering_matrix(model, '1', '1')[1]
 test = jls.get_solution(prob, s11_expr, (1,0))
 
-
-
 plot(abs.(test))
 
 using Plots
 ωp = 2*pi*4.75001e9./ωc
 δI = 11.3e-9/I₀
 
-jpa_params = copy(sweep_params)
+jpa_params = copy(ps)
 jpa_params[jls.P1.source.I] = δI
+jpa_params[jls.P1.source.ω] = ωp
+δU = jls.perturbation_response(sys, jls.P1.source.I, jpa_params)
 
-pert = jls.perturbation_response(sys, jls.P1.source.I, jpa_params)
-
-pump_prob = jls.HarmonicProblem(sys, ωp, jpa_params)
-jls.solve!(pump_prob)
+pump_prob = jls.LinearisedProblem(sys, jpa_params, δU, Ω_vec)
+out = jls.solve!(pump_prob)
 U₀ = abs.(pump_prob.result.solution[jls.P1.source.ω][:, end])
-
+using Plots
 Ω_vec = collect(2*pi*(4.5:0.001:5.0)*1e9)/ωc
 lin_prob = jls.HarmonicProblem(sys, Ω_vec, jpa_params; U₀=U₀, linear_response = (ωp, pert))
 lin_res = jls.solve!(lin_prob)
+
+I1 = jls.get_solution(pump_prob, jls.P1.i, 1)
+plot(abs.(1im*out[18,:]+out[17,:]))
+
+abs.(1im*out[18,:]+out[17,:])
 
 Z0 = 50.0
 V_sig = I₀*R₀.*jls.get_output(sys, lin_prob, lin_res, jls.P1.dφ, 1)

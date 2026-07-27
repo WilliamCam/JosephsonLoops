@@ -35,17 +35,6 @@ function get_solution(h_prob::HarmonicProblem, expression::Num, order::Union{Int
     return output_arr
 end
 
-# Small-signal response phasor of `var` (the variable symbol) at the requested order. The harmonic system
-# is passed in (rather than read off the problem) so the harmonic_system field can later
-# be dropped from the problem structs. Restricted to state variables: an observed
-# quantity's expression would have to be differentiated at the working point (δf = ∇f·δc),
-# not evaluated at the perturbation — TODO.
-function get_output(h_sys::HarmonicSystem, lin_prob::LinearisedProblem, result::HarmonicResult, var::Num, order::Int = 1)
-    haskey(h_sys.variable_map, (Symbolics.unwrap(var), max(order, 1), :Cos)) ||
-        error("Linearised get_output supports state variables only; $var is not a state.")
-    expression = get_harmonic_expression(h_sys, var, order)
-    return apply_harmonic_expression(h_sys, lin_prob, result, expression)
-end
 
 #  Harmonic expressions
 """
@@ -137,39 +126,6 @@ end
 # Linearised counterpart: the response array rows follow the jacobian's `vars` ordering,
 # and the responses are complex, so evaluate the same expressions with complex inputs.
 # For a plain state this reduces to resp[row(cos)] + im*resp[row(sin)].
-function apply_harmonic_expression(h_sys::HarmonicSystem, lin_prob::LinearisedProblem, result::HarmonicResult, expression::Tuple{Num,Num})
-    isnothing(lin_prob.parameter_sweep) || error("get_output supports ω-only sweeps")
-    ω, ω_values = lin_prob.ω_sweep
-    ω_vec = ω_values isa Number ? [Float64(ω_values)] : ω_values
-
-    solution = result.solution[ω]
-    states = h_sys.full_eqs.states   # cache
-    vmap = h_sys.variable_map
-    vars = Num[]
-    for s in states
-        state_symbol = Symbolics.unwrap(s)
-        push!(vars, vmap[(state_symbol, 0, :Cos)])
-        for n in 1:h_sys.N
-            push!(vars, vmap[(state_symbol, n, :Cos)])
-            push!(vars, vmap[(state_symbol, n, :Sin)])
-        end
-    end
-
-    input_syms = Symbolics.unwrap.(vars)
-    cos_row = findfirst(x -> isequal(x, Symbolics.unwrap(expression[1])), input_syms)
-    sin_row = findfirst(x -> isequal(x, Symbolics.unwrap(expression[2])), input_syms)
-    if cos_row !== nothing && sin_row !== nothing
-        return solution[cos_row, :] .+ im .* solution[sin_row, :]
-    end
-
-    f_re, f_im = compile_phasor(expression, input_syms,
-                                lin_prob.parameters, h_sys.system, ω)
-
-    return map(axes(solution, 2)) do i
-        input_vec = [solution[:, i]; complex(ω_vec[i])]
-        f_re(input_vec) + im * f_im(input_vec)
-    end
-end
 
 function compile_expression(expr::Complex{Num}, system::ModelingToolkit.System, parameter_values::Dict{Num,Float64};
         sweep_parameters::Vector{Num} = [Num(nothing)]

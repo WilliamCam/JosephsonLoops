@@ -15,5 +15,6 @@ include("harmonic balance/utils.jl")
 include("harmonic balance/symbolic_rules.jl")
 include("harmonic balance/get_phasor.jl")
 include("harmonic balance/colocation.jl")
+include("linearisation/linear_system.jl")
 
 end # module JLoop

@@ -21,7 +21,7 @@ end
 struct HarmonicSystem
     system::ModelingToolkit.AbstractSystem
     time_domain_system::ModelingToolkit.System
-    ω::Tuple{Num,Num} # (ωp, ωs)
+    ω::Tuple{Num,Num} # (ω1, ω2) in multi-tone systems
     N::Int
     harmonic_ansatz::Vector{Num}
     variable_map::Dict{Num, FourierBasis}
@@ -43,17 +43,6 @@ struct HarmonicProblem
     result::HarmonicResult
 end
 
-
-struct LinearisedProblem
-    harmonic_system::HarmonicSystem
-    jacobian::Tuple{Matrix{Num},Matrix{Num}}
-    Ωs::Union{Float64,Vector{Float64}}
-    Ωp::Union{Float64,Vector{Float64}}
-    parameters::Dict
-    parameter_sweep::Union{Dict{Num, Vector{Float64}},Nothing}
-    δU::Union{ComplexF64,Vector{ComplexF64}}
-    result::HarmonicResult
-end
 
 function solve!(harmonic_problem::HarmonicProblem; continuation::Bool = true, kwargs...)
     result = harmonic_problem.result.solution
@@ -94,81 +83,6 @@ function solve!(harmonic_problem::HarmonicProblem; continuation::Bool = true, kw
     return result
 end
 
-function solve!(linear_problem::LinearisedProblem)
-    ω, ω_values = linear_problem.ω_sweep
-    result = linear_problem.result
-
-    if isnothing(linear_problem.parameter_sweep)
-        println("Performing sweep $(ω) over $(length(ω_values)) points...")
-        output_array = result.solution[ω]
-        K = size(linear_problem.jacobian[1],1)
-        numeric_substitution = merge(linear_problem.parameters, linear_problem.working_point, Dict(ω => linear_problem.ω_pump))
-        # Float64 conversion errors loudly if any symbol survived the substitution
-        # (e.g. a missing working-point entry) instead of silently solving symbolically.
-        J₀ = Float64.(Symbolics.value.(substitute(linear_problem.jacobian[1], numeric_substitution)))
-        J₁ = Float64.(Symbolics.value.(substitute(linear_problem.jacobian[2], numeric_substitution)))
-
-        U_small_signal = SVector{K}(linear_problem.U_perturbation)
-
-        for (column_index, Ω) in enumerate(ω_values)
-            mat = J₀ - 1im * (Ω - linear_problem.ω_pump) * J₁
-            output_array[:, column_index] .= _linear_solve(mat, U_small_signal, column_index == 1)
-        end
-    else
-        for param_sweep in linear_problem.parameter_sweep
-            sweep_parameter = param_sweep.first
-            sweep_values = param_sweep.second
-            println("Performing 2D Sweep $(sweep_parameter) over $(length(ω_values)*length(sweep_values)) points...")
-            output_array = result.solution[sweep_parameter]
-
-            U_small_signal = (linear_problem.U_perturbation)
-
-            for (parameter_index,_val) in enumerate(sweep_values)
-                numeric_substitution = merge(linear_problem.parameters, linear_problem.working_point,
-                    Dict(ω => linear_problem.ω_pump, sweep_parameter => _val))
-                J₀ = Float64.(Symbolics.value.(substitute(linear_problem.jacobian[1], numeric_substitution)))
-                J₁ = Float64.(Symbolics.value.(substitute(linear_problem.jacobian[2], numeric_substitution)))
-
-                for (column_index, Ω) in enumerate(ω_values)
-                    mat = J₀ - 1im * (Ω - linear_problem.ω_pump) * J₁
-                    output_array[:, parameter_index, column_index] .= _linear_solve(mat, U_small_signal, column_index == 1)
-                end
-            end
-        end
-
-    end
-    return result
-end
-
-
-function _linear_solve(mat::AbstractMatrix, U::AbstractVector, warn_once::Bool)
-    F = LinearAlgebra.lu(mat; check = false)
-    LinearAlgebra.issuccess(F) && return F \ U
-    warn_once && @warn "Linearised jacobian is singular (free coefficient / gauge freedom); using the minimum-norm solution."
-    return LinearAlgebra.pinv(mat) * U
-end
-
-function _nl_solve_method!(prealloc_array::Array{ComplexF64}, problem::NonlinearSolve.NonlinearProblem, sweep_parameter::Num, sweep_values::Union{Float64, Vector{Float64}}; 
-    continuation::Bool=true, parameter_index::Union{Int, Vector{Int}}, kwargs...
-        )
-    for (column_index, val) in enumerate(sweep_values)
-
-        problem.ps[sweep_parameter] = val
-
-        #TODO: Benchmark allocations for performance
-        sol = ModelingToolkit.solve(problem, kwargs...)
-
-        if continuation 
-            problem.u0 .= sol.u
-        end
-        if parameter_index != 0
-            prealloc_array[:, parameter_index..., column_index] .= sol.u
-        else
-            prealloc_array[:, column_index] .= sol.u
-        end
-    end
-end
-
 function HarmonicProblem(harmonic_system::HarmonicSystem, parameters::Dict; 
         parameter_sweep::Union{Vector{Pair{Num, Vector{Float64}}}, Nothing}=nothing, 
         U₀::Union{Vector{Float64},Nothing} = nothing, 
@@ -202,55 +116,12 @@ function HarmonicProblem(harmonic_system::HarmonicSystem, parameters::Dict;
     return HarmonicProblem(harmonic_system, nonlinear_prob, parameters, parameter_sweep, U₀, output)
 end
 
-function LinearisedProblem(harmonic_system::HarmonicSystem, parameters::Dict,
-    δU::AbstractVector; 
-    parameter_sweep::Union{Dict{Num, Vector{Float64}}, Nothing}=nothing, 
-    U₀::Union{Vector{Float64},Nothing} = nothing,
-    kwargs...)
-    @assert !isnothing(harmonic_system.jacobian) "Linearised problem requires a harmonic system with determined jacobian"
-
-    system = harmonic_system.system
-    ωp, ωs = harmonic_system.ω
-    system_unknowns = unknowns(system)
-    _Nvars = size(harmonic_system.jacobian[1], 1)
-    results_size = [_Nvars]
-    #Preallocate results object
-    key_map = Dict{Num,Int}()
-    if !isnothing(parameter_sweep)
-        if has_key(parameter_sweep, ωs)
-            Ωs = pop!(parameter_sweep, ωs)
-            results_size = vcat(results_size, length(Ωs))
-        end
-        if has_key(parameter_sweep, ωp)
-            Ωp = pop!(parameter_sweep, ωp)
-            results_size = vcat(results_size, length(Ωp))
-        end
-
-        keys_list = collect(keys(parameter_sweep))
-        for (sweep_key, index) in enumerate(keys_list)
-            results_size = vcat(result_size, length(parameter_sweep[sweep_key]))
-            key_map[sweep_key] = index
-        end
-    else
-        Ωp = parameters[ωp]
-        Ωs = parameters[ωs]
-    end
-    result_arr = Array{ComplexF64}(undef,results_size...)
-    output = HarmonicResult(key_map, result_arr)
-
-    #Determine inital condition state vector
-    if isnothing(U₀)  
-        U₀ = fill(0.0, length(unknowns(system)))
-    end
-    return LinearisedProblem(harmonic_system, harmonic_system.jacobian, Ωp, Ωs, parameters, parameter_sweep, ComplexF64.(δU), output)
-end
-
-#TODO:: LinearisedProbelm(::HarmonicProblem)
-
 function HarmonicSystem(sys, ω::Union{Num,Tuple{Num,Num}}, N::Int; tearing::Bool=true, determine_jacobian::Bool=false)
     if typeof(ω) !== Tuple
         ω = (ω, Num(0))
     end
+
+    #use of jacobian in linearisation requires all system variable to be present in final model
     determine_jacobian && (tearing = false)
 
     tvar = Num(ModelingToolkit.get_iv(sys))
