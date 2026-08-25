@@ -8,7 +8,7 @@ function substitute_to_fixpoint(expr, subs; max_iters = 20, transform = identity
     return expr
 end
 
-function get_solution(h_prob::HarmonicProblem, expression::Num, order::Union{Int,Tuple{Int,Int}} = 1;
+function get_solution(h_prob, expression::Num, order::Union{Int,Tuple{Int,Int}} = 1;
     time_domain_solution::Bool = false)
     expr_vars = Num.(get_variables(expression))
     if time_domain_solution
@@ -29,6 +29,7 @@ function get_solution(h_prob::HarmonicProblem, expression::Num, order::Union{Int
         harmonic_expr = expression_for_var(h_prob.harmonic_system, expression, order)
     end
     harmonic_expr = simplify(expand(harmonic_expr))
+    return harmonic_expr
     sol = h_prob.result.solution
     output_arr = Array{ComplexF64}(undef, size(sol)[2:end]...)
     apply_harmonic_expression!(output_arr, h_prob, harmonic_expr)
@@ -97,7 +98,7 @@ function reconstruct_from_observed(h_sys::HarmonicSystem, observed_var::Num)
 end
 
 
-function apply_harmonic_expression!(output::AbstractArray, h_prob::HarmonicProblem, expression::Complex{Num})
+function apply_harmonic_expression!(output::AbstractArray, h_prob, expression::Complex{Num})
     system = h_prob.harmonic_system.system
     result = h_prob.result.solution
     sweep = h_prob.parameter_sweep
@@ -123,9 +124,6 @@ function apply_harmonic_expression!(output::AbstractArray, h_prob::HarmonicProbl
     end
 end
 
-# Linearised counterpart: the response array rows follow the jacobian's `vars` ordering,
-# and the responses are complex, so evaluate the same expressions with complex inputs.
-# For a plain state this reduces to resp[row(cos)] + im*resp[row(sin)].
 
 function compile_expression(expr::Complex{Num}, system::ModelingToolkit.System, parameter_values::Dict{Num,Float64};
         sweep_parameters::Vector{Num} = [Num(nothing)]

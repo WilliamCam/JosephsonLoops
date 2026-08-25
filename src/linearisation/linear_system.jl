@@ -150,3 +150,28 @@ function perturbation_response(h_sys::HarmonicSystem, source_param::Num, paramet
     return U
 end
 
+function apply_harmonic_expression!(output::AbstractArray, h_prob::LinearProblem, expression::Complex{Num})
+    system = h_prob.harmonic_system.system
+    result = h_prob.result.solution
+    sweep = h_prob.parameter_sweep
+    sweep_params = h_prob.result.dependent_parameters
+    if !isnothing(sweep)
+        output_func = compile_expression(expression, system, h_prob.parameters, sweep_parameters = sweep_params)
+        input_vec = similar(result, size(result, 1) + length(sweep))
+        state_len = size(result, 1)
+
+        @views for (linear_idx, cart_index) in enumerate(CartesianIndices(axes(result)[2:end]))
+
+            input_vec[1:state_len] .= result[:, cart_index]
+
+            for (idx, param_sweep) in enumerate(sweep)
+                p_vals = last(param_sweep)
+                input_vec[state_len + idx] = p_vals[linear_idx]
+            end
+
+            output[cart_index] = output_func(input_vec)
+        end
+    else
+        print("Non sweep output")
+    end
+end
