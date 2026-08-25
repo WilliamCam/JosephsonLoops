@@ -15,7 +15,7 @@ function solve!(linear_problem::LinearisedProblem; kwargs...)
     sweep_space = linear_problem.parameter_sweep
 
     Ωp = linear_problem.harmonic_system.ω
-    single_tone = Ωp[2] == Num(0)
+    single_tone = isequal(Ωp[2], Num(0))
 
     Ωs = linear_problem.Ωs
     δU = linear_problem.δU
@@ -74,7 +74,7 @@ function LinearisedProblem(harmonic_system::HarmonicSystem, parameters::Dict,
 
     # Will linearise around each pump tone if there is more than one
     ω1, ω2 = harmonic_system.ω
-    ω2 == Num(0) ? results_size = [_Nvars, length(Ωs)] : results_size = [_Nvars, 2, length(Ωs)]  
+    isequal(ω2, Num(0)) ? results_size = [_Nvars, length(Ωs)] : results_size = [_Nvars, 2, length(Ωs)]
     dep_params = Num[]
     #Preallocate results object
     #TODO: Support for linear parameter sweeps i.e. capacitance/resistance -> doesnt require re-solving NL system working point!
@@ -102,6 +102,68 @@ function LinearisedProblem(harmonic_system::HarmonicSystem, parameters::Dict,
 end
 
 #TODO:: LinearisedProbelm(::HarmonicProblem)
+
+function get_solution(lin_prob::LinearisedProblem, expression::Num, order::Union{Int,Tuple{Int,Int}} = 1)
+    h_sys = lin_prob.harmonic_system
+    expr_vars = Num.(get_variables(expression))
+    if length(expr_vars) > 1
+        sub_dict = Dict{Num,Num}()
+        for var in expr_vars
+            #TODO assert var is in parameters or observed or states
+            if var_is_in(parameters(h_sys.system), var)
+                continue
+            end
+            harmonic_var = expression_for_var(h_sys, var, order)
+            sub_dict[var] = harmonic_var
+        end
+        harmonic_expr = substitute(expression, sub_dict)
+    else
+        harmonic_expr = expression_for_var(h_sys, expression, order)
+    end
+    harmonic_expr = simplify(expand(harmonic_expr))
+    sol = lin_prob.result.solution
+    output_arr = Array{ComplexF64}(undef, size(sol)[2:end]...)
+    apply_harmonic_expression!(output_arr, lin_prob, harmonic_expr)
+    return output_arr
+end
+
+# Linearised counterpart: the response array rows follow the jacobian's `vars` ordering
+# (see harmonic_equation), not unknowns(system), and the responses are complex, so the
+# same phasor expression is evaluated with complex inputs. The signal frequency enters
+# through the tone symbols (the differentiated ansatz carries them), so they are compiled
+# as inputs and fed per column. For a plain state this reduces to
+# resp[row(cos)] + im*resp[row(sin)].
+function apply_harmonic_expression!(output::AbstractArray, lin_prob::LinearisedProblem, expression::Complex{Num})
+    h_sys = lin_prob.harmonic_system
+    result = lin_prob.result.solution
+    ω1, _ = h_sys.ω
+
+    _, states, _, _ = get_full_equations(h_sys.time_domain_system)
+    input_syms = Num[]
+    for state in states
+        basis = h_sys.variable_map[state]
+        push!(input_syms, basis.dc_coeff)
+        for n in 1:length(basis.fourier_indicies)-1
+            push!(input_syms, basis.cos_coeffs[n], basis.sin_coeffs[n])
+        end
+    end
+    @assert length(input_syms) == size(result, 1) "Jacobian variable ordering does not match linear response rows"
+
+    # Linearisation is always around a single declared pump (any other tone of a
+    # multi-tone system stays at its parameter value), so the response is [vars, Ω] and
+    # the signal frequency is fed through the pump symbol per column.
+    @assert ndims(result) == 2 "Linearised response must be [vars, Ω] — declare a single pump when solving"
+    output_func = compile_expression(expression, h_sys.system, lin_prob.parameters;
+        sweep_parameters = [ω1], input_syms = Symbolics.unwrap.(input_syms))
+
+    state_len = length(input_syms)
+    input_vec = Vector{ComplexF64}(undef, state_len + 1)
+    @views for (column_index, Ω) in enumerate(lin_prob.Ωs)
+        input_vec[1:state_len] .= result[:, column_index]
+        input_vec[end] = Ω
+        output[column_index] = output_func(input_vec)
+    end
+end
 
 #Creates system pertubation response in harmonic frame
 function perturbation_response(h_sys::HarmonicSystem, source_param::Num, parameters::Dict; amplitude::Float64 = 1.0)
@@ -143,8 +205,10 @@ function perturbation_response(h_sys::HarmonicSystem, source_param::Num, paramet
             if isequal(I, 0.0) && isequal(Q, 0.0)
                 continue
             end
-            U[base + 2n + 1] -= amplitude * (I - im * Q)
-            U[base + 2n] -= amplitude * (Q + im * I)
+            # fourier_indicies[n] fills coefficient slot n-1 (entry 1 is DC), whose
+            # projected rows are base + 2(n-1) (cos) and base + 2(n-1)+1 (sin).
+            U[base + 2n - 1] -= amplitude * (I - im * Q)
+            U[base + 2n - 2] -= amplitude * (Q + im * I)
         end
     end
     return U

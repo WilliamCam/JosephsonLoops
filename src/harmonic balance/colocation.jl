@@ -39,8 +39,11 @@ end
 function harmonic_solution_symbolic_derrivative(fourier_basis::FourierBasis, ω1::Num, ω2::Num, tvar::Num)
     indices = fourier_basis.fourier_indicies
     N = length(indices)-1
-    cos_fourier, sin_fourier = fourier_basis.cos_coeffs, fourier_basis.sin_coeffs
-    dcos_fourier, dsin_fourier = fourier_basis.d_cos_coeffs, fourier_basis.d_sin_coeffs
+    # must mirror harmonic_solution's quadrature convention (sin_coeffs on cos,
+    # cos_coeffs on sin): the jacobian substitutes X and its derivatives into the same
+    # equations, so both builders have to agree on which array carries which quadrature.
+    cos_fourier, sin_fourier = fourier_basis.sin_coeffs, fourier_basis.cos_coeffs
+    dcos_fourier, dsin_fourier = fourier_basis.d_sin_coeffs, fourier_basis.d_cos_coeffs
     #TODO: Remove derrivative variable of DC term
     dc_of_t = (@variables dc(tvar))[1]
     d_dc_of_t = (@variables d_dc(t))[1]
@@ -74,8 +77,17 @@ function harmonic_solution_symbolic_derrivative(fourier_basis::FourierBasis, ω1
                 ])
             )
         dX += dX_harmonic_of_t
-        #d2Xdt2, simplify the expression and remove slow second order terms A''/B''
-        d2X_harmonic_of_t = simplify(expand_derivatives(D(dX_harmonic_of_t)), expand=true, rewriter=remove_slow_d2_rewriter)
+        #d2Xdt2: the second differentiation re-creates D(a)/D(b) terms carrying the second
+        # half of the 2ω cross terms — substitute them to envelope rates BEFORE the
+        # rewriter, so only the genuinely slow second-order D(da)/D(db) terms are dropped.
+        # (Without this the cross terms halve and every linearised linewidth doubles.)
+        d2X_raw = substitute(expand_derivatives(D(dX_harmonic_of_t)),
+            Dict([
+                D(cos_of_t[n])=>d_cos_of_t[n],
+                D(sin_of_t[n])=>d_sin_of_t[n]
+                ])
+            )
+        d2X_harmonic_of_t = simplify(d2X_raw, expand=true, rewriter=remove_slow_d2_rewriter)
         d2X += d2X_harmonic_of_t
     end
     @assert has_derivative(d2X)==false "Differential operator D(t) cannot be in $d2X -> replace with Symbolics variable e.g. 'dA[1]'"
@@ -95,7 +107,8 @@ function harmonic_equation(eqs::Vector{Equation}, states::Vector{Num}, tvar::Num
     @assert length(ω) <= 2 "maximum of two tones supported"
 
     ω1, ω2 = ω
-    single_tone = ω2 ==Num(0)
+    # isequal, not ==: Num == Num is symbolic when ω2 is a real frequency symbol
+    single_tone = isequal(ω2, Num(0))
 
     basis_map = construct_fourier_basis(N, states, intermod_order = intermod_oder, single_tone = single_tone)
     N_terms = length(basis_map[states[1]].fourier_indicies)
@@ -121,8 +134,8 @@ function harmonic_equation(eqs::Vector{Equation}, states::Vector{Num}, tvar::Num
         #derivatives
         if jac
             dX, d2X = harmonic_solution_symbolic_derrivative(cur_fourier_basis, ω1, ω2, tvar)
-            jac_subs[Differential(tvar)(Differential(tvar)(states[k]))] = dX
-            jac_subs[Differential(tvar)(states[k])]                     = d2X
+            jac_subs[Differential(tvar)(Differential(tvar)(states[k]))] = d2X
+            jac_subs[Differential(tvar)(states[k])]                     = dX
             jac_subs[states[k]]                                         = harmonic_state
             push!(vars, cur_fourier_basis.dc_coeff)
             push!(dvars, cur_fourier_basis.d_dc_coeff)
