@@ -50,7 +50,8 @@ function solve!(harmonic_problem::HarmonicProblem; continuation::Bool = true, kw
     sweep_space = harmonic_problem.parameter_sweep
     continuation_axis = 1
 
-    working_prob = remake(nonlinear_prob; u0 = harmonic_problem.U₀)
+ #continuation, not sure if needed ask will 
+    working_prob = remake(nonlinear_prob; u0 = copy(harmonic_problem.U₀))
 
     if isnothing(sweep_space)
         sol = ModelingToolkit.solve(working_prob, kwargs...)
@@ -58,7 +59,7 @@ function solve!(harmonic_problem::HarmonicProblem; continuation::Bool = true, kw
     else
         param_keys = [sweep_space[d].first for d in eachindex(sweep_space)]
         update_parameters! = ModelingToolkit.setp(working_prob, param_keys)
-        param_space = CartesianIndices(axes(result)[2:end])
+        param_space = CartesianIndices(axes(result)[2:end]) 
         for cart_index in param_space
             current_params = [sweep_space[axis].second[cart_index[axis]] for axis in eachindex(sweep_space)]
 
@@ -117,7 +118,9 @@ function HarmonicProblem(harmonic_system::HarmonicSystem, parameters::Dict;
 end
 
 function HarmonicSystem(sys, ω::Union{Num,Tuple{Num,Num}}, N::Int; tearing::Bool=true, determine_jacobian::Bool=false)
-    if typeof(ω) !== Tuple
+    # `typeof(ω) !== Tuple` was always true (Tuple{Num,Num} !== the UnionAll Tuple),
+    # double-wrapping real two-tone inputs.
+    if !(ω isa Tuple)
         ω = (ω, Num(0))
     end
 

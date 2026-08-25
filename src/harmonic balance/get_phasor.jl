@@ -124,11 +124,10 @@ function apply_harmonic_expression!(output::AbstractArray, h_prob, expression::C
     end
 end
 
-
 function compile_expression(expr::Complex{Num}, system::ModelingToolkit.System, parameter_values::Dict{Num,Float64};
-        sweep_parameters::Vector{Num} = [Num(nothing)]
+        sweep_parameters::Vector{Num} = [Num(nothing)],
+        input_syms::AbstractVector = Symbolics.unwrap.(unknowns(system))
     )
-    input_syms = Symbolics.unwrap.(unknowns(system))
     observed_subs = Dict(eq.lhs => eq.rhs for eq in observed(system)
                          if !(Symbolics.symtype(Symbolics.unwrap(eq.lhs)) <: AbstractArray))
     fixed_params = Dict(Num(p) => Float64(parameter_values[Num(p)]) for p in parameters(system)
