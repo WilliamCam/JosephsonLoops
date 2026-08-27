@@ -67,8 +67,12 @@ system is a symbolic operation, so expect the first call in a session to be slow
 The module does not export any names, so every name must be qualified. Every example uses a
 short alias.
 
-Every user facing function carries a docstring, so `?HarmonicSystem` in the REPL gives its
-full reference including arguments, return values and known traps.
+Every user facing function carries a docstring giving its arguments, return values and known
+traps. Because nothing is exported, help lookups must be qualified too.
+
+```julia
+?JosephsonLoops.HarmonicSystem     # or ?jls.HarmonicSystem once the alias is defined
+```
 
 ```julia
 using JosephsonLoops
