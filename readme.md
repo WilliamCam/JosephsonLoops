@@ -27,7 +27,7 @@ either as an initial value problem or as a harmonic balance problem.
 
 ## Why loop currents
 
-Most harmonic balance simulators for superconducting circuits, including
+harmonic balance simulators for superconducting circuits, including
 [JosephsonCircuits.jl](https://github.com/kpobrien/JosephsonCircuits.jl), use a nodal
 formulation. They solve for node fluxes. JosephsonLoops.jl uses a mesh formulation instead.
 It solves for loop currents, and the circuit is entered as a list of loops rather than as a
@@ -141,6 +141,11 @@ The first letter of a component name selects its type.
 | `I` | Current source | `I`, `ω`, `I₂`, `ω₂` | `i ~ I*sin(ω*t) + I₂*sin(ω₂*t)` |
 | `P` | Port | `Rₙ.r`, `source.I`, `source.ω` | resistor in parallel with a current source |
 
+Component handles such as `jls.P1` and `jls.J1` are created by `build_circuit`, which
+generates them as module level names taken from the netlist strings. They do not exist before
+that call. This is why parameters are written as `jls.J1.α` even though `J1` never appears in
+your own code.
+
 A port is a composite. It contains a resistor `Rₙ` and a current source `source`, and it
 exposes the port current `i` and the port voltage `dφ`. Port parameters are reached through
 those subcomponents, for example `jls.P1.Rₙ.r` and `jls.P1.source.ω`.
@@ -223,7 +228,8 @@ For the parametric amplifier below, `N = 2` gives 13.119 dB and `N = 3` gives 13
 against a reference value of 13.301 dB, so `N = 3` is converged for that circuit.
 
 Set `determine_jacobian = true` if you intend to do small signal analysis afterwards. This
-builds the additional matrices the linearised solver needs.
+builds the additional matrices the linearised solver needs. It also forces `tearing = false`,
+because the linearised solve needs every system variable to survive into the final model.
 
 For a steady state sweep, wrap the system in a `HarmonicProblem`.
 
@@ -261,9 +267,19 @@ frequencies above rationalise to 93:97, which moves the second tone by 430 Hz. T
 ratio and the size of that shift are reported when the system is built.
 
 If the ratio is not close to a small rational number, or if `tones` is omitted, the backend
-falls back to a two dimensional torus grid. This samples the two tone phases independently,
-so both frequencies remain symbolic and any ratio is allowed. See
-[Current status](#current-status) for the validation state of this path.
+uses a two dimensional torus grid instead. This samples the two tone phases independently, so
+both drive frequencies remain symbolic and any ratio is allowed, with no shift applied to
+either tone.
+
+Both grids reproduce the doubly pumped benchmark below. At `intermod_order = 3` the torus
+grid gives a peak of 10.564 dB and the commensurate grid gives 10.563 dB, against a reference
+value of 10.553 dB. Choose the commensurate grid when the pump ratio is a simple rational
+number, since it needs fewer collocation points. Choose the torus grid for arbitrary ratios.
+
+Note that the two grids only agree once the basis is converged. At `intermod_order = 0` they
+differ by several dB at the gain peak, because neither basis contains the mixing products that
+carry the parametric conversion and each grid folds the missing content back differently. That
+disagreement is a symptom of the truncation, not of the grid.
 
 Two keyword arguments tune the choice. `commensurate_tol` is the relative tolerance for
 accepting a rational ratio, and defaults to `1e-6`. `max_denominator` caps the integers that
@@ -513,8 +529,9 @@ Script: `src/examples/rf-squid-coupler-hysteresis.jl`. Comparison: `mit_rf_squid
 |---|---|---|---|
 | JPA gain peak | 13.119 dB at `N = 2`, 13.295 dB at `N = 3` | 13.301 dB | 0.006 dB at `N = 3` |
 | JPA 3 dB bandwidth | 12.0 MHz | 12 MHz | matched |
-| Doubly pumped JPA peak | 10.563 dB | 10.553 dB | 0.010 dB |
-| Doubly pumped JPA band | median difference 0.00063 dB | | |
+| Doubly pumped JPA peak, commensurate grid | 10.563 dB | 10.553 dB | 0.010 dB |
+| Doubly pumped JPA peak, torus grid | 10.564 dB | 10.553 dB | 0.011 dB |
+| Doubly pumped JPA band | median difference 0.00063 dB commensurate, 0.00070 dB torus | | |
 | Coupler baseline, `βL = 0.6/0.8/1.0` | -46.7 / -42.7 / -39.7 dB | analytic and JosephsonCircuits.jl agree | about 0.1 dB |
 | Coupler peak at half flux | -34.6 / -23.6 / 0.0 dB | analytic and JosephsonCircuits.jl agree | about 0.1 dB |
 | Hysteresis fold positions | 0.40 and 0.60 | analytic 0.391 and 0.609 | within one grid step |
@@ -528,10 +545,6 @@ their source publications.
 This package is under active development as part of a masters thesis. The following areas are
 known to be incomplete.
 
-The two dimensional torus grid for arbitrary tone ratios is implemented but not yet
-validated. Use `tones` with a rational pump ratio for production work. Validation of the
-torus path against the doubly pumped benchmark is in progress.
-
 Parameter sweeps in `LinearisedProblem` are not implemented. The branch exists but is empty,
 so linear component sweeps still require re-solving the working point.
 
@@ -544,6 +557,11 @@ here are the maintained ones.
 
 The ensemble sweep helpers `ensemble_fsolve` and `ensemble_parameter_sweep` call `mean`
 without importing `Statistics`, so they raise an `UndefVarError` when used.
+
+`build_circuit` prints the branch names and the full component dictionary on every call, with
+no way to silence it. The second return value, `u0`, is always an empty vector, because the
+line that would populate it is commented out. Pass `guesses` where an initial state is needed,
+which is what the examples do.
 
 Only the component prefixes `I`, `R`, `C`, `J`, `L` and `P` are recognised. A netlist entry
 starting with any other letter is silently dropped during parsing and then fails later with a
