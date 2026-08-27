@@ -124,11 +124,35 @@ function HarmonicProblem(harmonic_system::HarmonicSystem, parameters::Dict;
 end
 
 function HarmonicSystem(sys, ω::Union{Num,Tuple{Num,Num}}, N::Int; tearing::Bool=true, determine_jacobian::Bool=false,
-        intermod_order::Int=0, commensurate::Union{Nothing,Tuple{Int,Int}}=nothing)
+        intermod_order::Int=0, tones::Union{Nothing,Tuple{<:Real,<:Real}}=nothing,
+        commensurate_tol::Real=1e-6, max_denominator::Int=1000, oversample::Int=2)
     # `typeof(ω) !== Tuple` was always true (Tuple{Num,Num} !== the UnionAll Tuple),
     # double-wrapping real two-tone inputs.
     if !(ω isa Tuple)
         ω = (ω, Num(0))
+    end
+
+    # Two-tone grid selection, all in the backend (no integers in the API):
+    #  * `tones` given (the pump frequencies as plain numbers, any consistent units —
+    #    only the ratio is used) and the ratio is within commensurate_tol of a small
+    #    rational: 1D commensurate grid (ω1 = p·ω0, ω2 = q·ω0), tone 2 snapped.
+    #  * otherwise (no tones, or a nearly incommensurate ratio): 2D torus grid — both
+    #    tones stay fully symbolic, any ratio solvable, no snapping.
+    commensurate = nothing
+    if !isequal(ω[2], Num(0))
+        if tones === nothing
+            @info "two-tone HB: no tones given — using the 2D torus grid (any tone ratio, both tones symbolic)"
+        else
+            rat = rationalize(Int, float(tones[2] / tones[1]), tol = commensurate_tol)
+            p, q = denominator(rat), numerator(rat)
+            if max(p, q) > max_denominator
+                @info "tone ratio $(tones[2]/tones[1]) has no rational form with integers ≤ $max_denominator within tol = $commensurate_tol — using the 2D torus grid"
+            else
+                snapped = (q / p) * tones[1]
+                @info "commensurate two-tone grid: ω1:ω2 = $p:$q, tone 2 snapped to $(snapped) (relative shift $(abs(snapped / tones[2] - 1)))"
+                commensurate = (p, q)
+            end
+        end
     end
 
     #use of jacobian in linearisation requires all system variable to be present in final model
@@ -140,7 +164,8 @@ function HarmonicSystem(sys, ω::Union{Num,Tuple{Num,Num}}, N::Int; tearing::Boo
     eqs_arg    = length(states) == 1 ? eqs[1]         : eqs
     states_arg = length(states) == 1 ? Num(states[1]) : states
     nonlinear_sys, X, variable_map, jac = harmonic_equation(eqs_arg, Num.(states_arg), tvar, ω, N;
-        jac=determine_jacobian, intermod_order=intermod_order, commensurate=commensurate)
+        jac=determine_jacobian, intermod_order=intermod_order, commensurate=commensurate,
+        oversample=oversample)
     
     sys_eqs, sys_vars = equations(nonlinear_sys), unknowns(nonlinear_sys)
     

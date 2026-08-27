@@ -9,6 +9,17 @@ function sample_collocation_grid!(residuals, Nt, res_expr, ω1, tvar)
     end
 end
 
+# Torus (hyper-time) sampler for arbitrary tone ratios: the residual's trig has been
+# retagged from (m·ω1+n·ω2)·t to the independent phases m·θ1+n·θ2, so every sample is
+# a pure number while ω1, ω2 stay fully symbolic. Sample order (i outer, j inner) must
+# match the 2D rotate_to_harmonic_frame column order.
+function sample_collocation_grid_2D!(residuals, Nt1, Nt2, res_expr, θ1, θ2)
+    for i in 0:(Nt1-1), j in 0:(Nt2-1)
+        res_at = substitute(res_expr, Dict(θ1 => (2π*i)/Nt1, θ2 => (2π*j)/Nt2))
+        push!(residuals, res_at ~ 0)
+    end
+end
+
 function harmonic_solution(fourier_basis::FourierBasis, ω1::Num, ω2::Num, t::Num)
     indices = fourier_basis.fourier_indicies
     X = fourier_basis.dc_coeff
@@ -86,7 +97,7 @@ function harmonic_solution_symbolic_derrivative(fourier_basis::FourierBasis, ω1
 end
 
 function harmonic_equation(eqs::Vector{Equation}, states::Vector{Num}, tvar::Num, ω::Union{Tuple{Num,Num}}, N::Int;
-        jac=false, intermod_order = 0, commensurate = nothing)
+        jac=false, intermod_order = 0, commensurate = nothing, oversample::Int = 1)
 
     M = length(states)
     if M==1
@@ -103,19 +114,45 @@ function harmonic_equation(eqs::Vector{Equation}, states::Vector{Num}, tvar::Num
     N_terms = length(basis_map[states[1]].fourier_indicies)
 
     if !single_tone
-        @assert commensurate !== nothing "two-tone HB needs commensurate = (p, q) with ω1 = p·ω0, ω2 = q·ω0 (integers)"
-        p, q = commensurate
-        n_ints = [m * p + n * q for (m, n) in basis_map[states[1]].fourier_indicies[2:end]]
-       
-        Nt_two_tone = 0
-        for cand in (2 * N_terms - 1):(2 * maximum(abs.(n_ints)) + 1)
-            folded = [mod.(n_ints, cand); mod.(.-n_ints, cand)]  # where each slot's ± harmonics land
-            if !any(iszero, folded) && allunique(folded)
-                Nt_two_tone = cand
-                break
+        indices_ac = basis_map[states[1]].fourier_indicies[2:end]
+        if commensurate !== nothing
+            # 1D commensurate grid: ω1 = p·ω0, ω2 = q·ω0, every slot an integer harmonic
+            p, q = commensurate
+            n_ints = [m * p + n * q for (m, n) in indices_ac]
+
+            # oversample raises the scan floor so out-of-basis mixing products (which the
+            # selector does NOT track — it only keeps the basis slots collision-free
+            # among themselves) tend to fold onto empty rows instead of occupied slots
+            Nt_floor = oversample * (2 * N_terms - 1)
+            Nt_two_tone = 0
+            for cand in Nt_floor:max(2 * maximum(abs.(n_ints)) + 1, Nt_floor + 2 * N_terms)
+                folded = [mod.(n_ints, cand); mod.(.-n_ints, cand)]  # where each slot's ± harmonics land
+                if !any(iszero, folded) && allunique(folded)
+                    Nt_two_tone = cand
+                    break
+                end
+            end
+            @assert Nt_two_tone > 0 "mixing products collide at every grid size — change (p, q) or the truncation"
+        else
+            # 2D torus (hyper-time) grid: any tone ratio, ω1/ω2 stay symbolic. The two
+            # phases are sampled independently at their per-axis Nyquist sizes, and the
+            # slot trig is retagged from (m·ω1+n·ω2)·t to m·θ1+n·θ2 before sampling —
+            # the tones never meet a trig argument, so no rational ratio is needed.
+            # oversample > 1 pushes the nonlinearity's out-of-basis mixing products onto
+            # empty grid rows instead of aliasing them onto basis slots (measured: the
+            # minimal grid shifts the intermod-0 JPA peak by 3.5 dB via (3,0) folding
+            # onto (2,0)'s conjugate)
+            Nt1 = 2 * oversample * maximum(abs(m) for (m, n) in indices_ac) + 1
+            Nt2 = 2 * oversample * maximum(abs(n) for (m, n) in indices_ac) + 1
+            θ1 = Symbolics.variable(:θ_torus_1)
+            θ2 = Symbolics.variable(:θ_torus_2)
+            retag = Dict{Num, Num}()
+            for (m, n) in indices_ac
+                arg = (m * ω1 + n * ω2) * tvar
+                retag[cos(arg)] = cos(m*θ1 + n*θ2)
+                retag[sin(arg)] = sin(m*θ1 + n*θ2)
             end
         end
-        @assert Nt_two_tone > 0 "mixing products collide at every grid size — change (p, q) or the truncation"
     end
     X = Num[]
     residuals = Equation[]
@@ -160,27 +197,34 @@ function harmonic_equation(eqs::Vector{Equation}, states::Vector{Num}, tvar::Num
     if jac
         d_harmonic_eqs = substitute(eqs, jac_subs)
     end
-    Nt = single_tone ? 2*N_terms-1 : Nt_two_tone
-    ω_grid = single_tone ? ω1 : (1 // p) * ω1
-    tone_pin = single_tone ? Dict{Num,Num}() : Dict(ω2 => (q // p) * ω1)
+    # 1D grids (single-tone / commensurate): sample over one period, ω2 pinned rational.
+    # 2D grid (torus): retag the slot trig to θ1/θ2 and sample the phase lattice.
+    torus = !single_tone && commensurate === nothing
+    Nt = single_tone ? 2*N_terms-1 : (torus ? Nt1*Nt2 : Nt_two_tone)
+    ω_grid = (single_tone || torus) ? ω1 : (1 // p) * ω1
+    tone_pin = single_tone ? Dict{Num,Num}() : (torus ? retag : Dict(ω2 => (q // p) * ω1))
     for k in 1:M
         res_expr = harmonic_eqs[k].lhs - harmonic_eqs[k].rhs
         res_expr = single_tone ? Symbolics.simplify(res_expr) : substitute(res_expr, tone_pin)
-        sample_collocation_grid!(residuals, Nt, res_expr, ω_grid, tvar)
+        torus ? sample_collocation_grid_2D!(residuals, Nt1, Nt2, res_expr, θ1, θ2) :
+                sample_collocation_grid!(residuals, Nt, res_expr, ω_grid, tvar)
         if jac
             d_res_expr = d_harmonic_eqs[k].lhs - d_harmonic_eqs[k].rhs
             d_res_expr = single_tone ? Symbolics.simplify(d_res_expr) : substitute(d_res_expr, tone_pin)
-            sample_collocation_grid!(d_residuals, Nt, d_res_expr, ω_grid, tvar)
+            torus ? sample_collocation_grid_2D!(d_residuals, Nt1, Nt2, d_res_expr, θ1, θ2) :
+                    sample_collocation_grid!(d_residuals, Nt, d_res_expr, ω_grid, tvar)
         end
     end
     if single_tone
         @named sys = NonlinearSystem(residuals)
     else
-        projected = rotate_to_harmonic_frame(M, n_ints, Nt, residuals)
+        projected = torus ? rotate_to_harmonic_frame(M, indices_ac, Nt1, Nt2, residuals) :
+                            rotate_to_harmonic_frame(M, n_ints, Nt, residuals)
         @named sys = NonlinearSystem([expr ~ 0 for expr in projected])
     end
     if jac
         rotated_system = single_tone ? rotate_to_harmonic_frame(M, N, Nt, d_residuals) :
+                         torus       ? rotate_to_harmonic_frame(M, indices_ac, Nt1, Nt2, d_residuals) :
                                        rotate_to_harmonic_frame(M, n_ints, Nt, d_residuals)
         J0, J1, J2 = build_jacobians(rotated_system, vars, dvars, d2vars)
         return sys, X, basis_map, (J0, J1, J2)
