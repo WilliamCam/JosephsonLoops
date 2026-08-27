@@ -67,6 +67,9 @@ system is a symbolic operation, so expect the first call in a session to be slow
 The module does not export any names, so every name must be qualified. Every example uses a
 short alias.
 
+Every user facing function carries a docstring, so `?HarmonicSystem` in the REPL gives its
+full reference including arguments, return values and known traps.
+
 ```julia
 using JosephsonLoops
 const jls = JosephsonLoops
@@ -301,6 +304,7 @@ for frac in (0.05, 0.15, 0.3, 0.5, 0.7, 0.85, 1.0)
     p[jls.P1.source.I] = frac * Ip
     prob = jls.NonlinearProblem(sys.system, merge(Dict(sysu .=> U), p))
     sol = jls.ModelingToolkit.solve(prob, jls.NonlinearSolve.LevenbergMarquardt(); maxiters = 2000)
+    @assert maximum(abs.(sol.resid)) < 1e-9 "working point did not converge"
     global U = real.(sol.u)
 end
 ```

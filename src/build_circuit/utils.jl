@@ -1,5 +1,35 @@
 
 #transient simulation of whole system
+"""
+    tsolve(model, u0, param_pairs, tspan; DAE=false, solver_opts=Rodas5(), guesses=nothing)
+
+Solves the circuit in the time domain as an initial value problem. This is the alternative to
+harmonic balance, useful for checking a steady state result and for transients that harmonic
+balance cannot represent.
+
+# Arguments
+- `model`: the compiled model from [`build_circuit`](@ref).
+- `u0`: initial state. Note that `build_circuit` returns an empty `u0`, so pass `guesses` here.
+- `param_pairs`: parameter values.
+- `tspan`: time span in NORMALISED time, so multiply a physical duration by `ωc`.
+
+# Keywords
+- `DAE::Bool = false`: build a `DAEProblem` instead of an `ODEProblem`.
+- `solver_opts = Rodas5()`: the integrator.
+- `guesses = nothing`: initialisation guesses for the unknowns.
+
+# Returns
+- the solution object. Index it with a model variable, for example `tsol[C1.i]`.
+
+!!! note
+    Timing instrumentation is built in and prints on every call. Time domain solves are far
+    slower than harmonic balance for steady state problems.
+
+# Example
+
+tsol = tsolve(model, guesses, ps, (0.0, 1e-6) .* ωc; guesses = guesses)
+
+"""
 function tsolve(model, u0, param_pairs, tspan; DAE=false, solver_opts = Rodas5(), guesses = nothing, kwargs...)  
     if DAE
         prob = DAEProblem(model, merge(Dict(u0), Dict(param_pairs)), tspan; kwargs...)
