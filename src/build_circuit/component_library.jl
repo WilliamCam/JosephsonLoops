@@ -112,9 +112,13 @@ end
     @parameters begin
         I = 1.0
         ω = 1.0, [tunable=true]
+        # optional second tone (two pumps through ONE port, like a nodal-port drive);
+        # I₂ = 0 keeps every single-tone circuit numerically identical
+        I₂ = 0.0
+        ω₂ = 1.0, [tunable=true]
     end
     @equations begin
-        i ~ I*sin(ω*t)
+        i ~ I*sin(ω*t) + I₂*sin(ω₂*t)
     end
 end
 
