@@ -209,13 +209,15 @@ function rotate_to_harmonic_frame(M, indices::Vector{Tuple{Int,Int}}, Nt1::Int, 
     total_cols = M * Nt
     Γ_total = zeros(Num, total_rows, total_cols)
     Γ_single = Matrix{Num}(undef, block_rows, Nt)
+    
+    chop(x) = abs(x) < 1e-12 ? 0.0 : x
     for i in 0:(Nt1-1), j in 0:(Nt2-1)
         col = i * Nt2 + j + 1
         Γ_single[1, col] = Num(1//Nt)
         for (k, (m, n)) in enumerate(indices)
             phase = m * i * (2π / Nt1) + n * j * (2π / Nt2)
-            Γ_single[2k, col]     = Num((2//Nt) * cos(phase))
-            Γ_single[2k + 1, col] = Num((2//Nt) * sin(phase))
+            Γ_single[2k, col]     = Num((2//Nt) * chop(cos(phase)))
+            Γ_single[2k + 1, col] = Num((2//Nt) * chop(sin(phase)))
         end
     end
     for d in 1:M

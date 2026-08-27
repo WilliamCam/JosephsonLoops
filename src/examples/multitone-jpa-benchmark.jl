@@ -78,4 +78,6 @@ else
     @warn "reference not found at $mit_csv — run mit_jpa_multitone_export.jl with the JosephsonCircuits-MIT project"
 end
 display(p_mt)
+# regenerates the figure used in the docs
+jls.savefig(p_mt, joinpath(pkgdir(jls), "docs", "images", "jpa-doubly-pumped.png"))
 

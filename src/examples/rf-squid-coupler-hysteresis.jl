@@ -109,3 +109,5 @@ p = jls.plot(xlabel = "Norm_Ext_Flux", ylabel = "dB(S(2,1))",
 jls.plot!(p, f_up, S21_up, lw = 2, label = "sweep up")
 jls.plot!(p, reverse(f_down), reverse(S21_down), lw = 2, ls = :dash, label = "sweep down")
 display(p)
+# regenerates the figure used in the docs
+jls.savefig(p, joinpath(pkgdir(jls), "docs", "images", "rf-squid-hysteresis.png"))

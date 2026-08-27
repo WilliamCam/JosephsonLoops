@@ -110,3 +110,5 @@ else
     @warn "reference not found at $mit_csv — run mit_rf_squid_coupler.jl with the JosephsonCircuits-MIT project"
 end
 display(p)
+# regenerates the figure used in the docs
+jls.savefig(p, joinpath(pkgdir(jls), "docs", "images", "rf-squid-coupler.png"))

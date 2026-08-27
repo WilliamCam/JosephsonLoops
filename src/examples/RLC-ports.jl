@@ -59,7 +59,13 @@ s11_expr = jls.get_HB_scattering_matrix(model, '1', '1')[1]
 test = jls.get_solution(prob, s11_expr, (1,0))
 
 
-lin_params[jls.P1.source.I] = 11.3e-9/I₀
+# Linearised (JPA) analysis: hold the pump fixed and sweep a small signal across it.
+# The pump tone has to be back in the parameter dict (the steady-state sweep above
+# deleted it), and Ω_vec is the signal grid the response is evaluated on.
+Ω_vec = ω_vec
+lin_params = copy(sweep_params)
+lin_params[jls.P1.source.ω] = 2π*4.75001e9/ωc     # MIT README JPA pump
+lin_params[jls.P1.source.I] = 11.3e-9/I₀          # their one-sided Ip = 5.65 nA ≡ our 11.3 nA
 δU_jpa = jls.perturbation_response(sys, jls.P1.source.I, lin_params, amplitude = lin_params[jls.P1.source.I])
 jpa = jls.LinearisedProblem(sys, lin_params, δU_jpa, Ω_vec)
 jls.solve!(jpa)
@@ -91,4 +97,6 @@ if isfile(mit_csv)
 else
     @warn "mit_jpa.csv not found — run mit_jpa_export.jl with the JosephsonCircuits-MIT project first."
 end
+# regenerates the figure used in the docs
+jls.savefig(p_gain, joinpath(pkgdir(jls), "docs", "images", "jpa-single-tone.png"))
 p_gain 
