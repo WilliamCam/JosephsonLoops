@@ -129,9 +129,6 @@ function compile_expression(expr::Complex{Num}, system::ModelingToolkit.System, 
     )
     observed_subs = Dict(eq.lhs => eq.rhs for eq in observed(system)
                          if !(Symbolics.symtype(Symbolics.unwrap(eq.lhs)) <: AbstractArray))
-    # parameters absent from parameter_values fall back to their MTK defaults, so
-    # defaulted parameters (e.g. an unused second source tone) never survive as
-    # uncompilable symbols in the extracted expression
     default_vals = ModelingToolkit.defaults(system)
     fixed_params = Dict{Num, Float64}()
     for p in parameters(system)

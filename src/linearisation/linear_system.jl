@@ -21,6 +21,7 @@ function solve!(linear_problem::LinearisedProblem; kwargs...)
 
     if isnothing(sweep_space)
         K = size(J₀,1)
+        #TODO: ????
         # gauge-free DC coefficients can make the Newton jacobian singular; fall back to LM
         sol = try
             ModelingToolkit.solve(nonlinear_prob; kwargs...)
@@ -39,6 +40,7 @@ function solve!(linear_problem::LinearisedProblem; kwargs...)
         # linearised around the single declared pump (tone 1): δ = Ω − ω1; the δ²J₂ term
         # makes the response exact in δ for the truncated basis
         Ωp_value = linear_problem.parameters[Ωp[1]]
+        #TODO: optional argument to only compute taylor expansion to second order (for speed)
         for (column_index, Ω) in enumerate(Ωs)
             δ = Ω - Ωp_value
             mat = J₀ - 1im * δ * J₁ - δ^2 * J₂

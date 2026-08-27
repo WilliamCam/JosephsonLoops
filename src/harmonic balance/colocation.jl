@@ -1,6 +1,21 @@
 using Symbolics
 using SymbolicUtils
 
+function sample_collocation_grid_2D!(residuals, Nt_1, Nt_2, res_expr, ω1, ω2, tvar)
+    # Define the number of samples for each tone
+    # Ni must be > 2*max_harmonic_order_i
+    for i in 0:(Nt_1-1)
+        for j in 0:(Nt_2-1)
+            # Calculate the specific time point t_{i,j}
+            # This covers the 2D torus without needing explicit theta variables
+            t_sample = (i * 2 * pi) / (Nt_1 * ω1) + (j * 2 * pi) / (Nt_2 * ω2)
+            # Substitute the actual numerical time value directly into t
+            res_at_coll = substitute(res_expr, Dict(tvar => t_sample))
+            push!(residuals, res_at_coll ~ 0)
+        end
+    end
+end
+
 function sample_collocation_grid!(residuals, Nt, res_expr, ω1, tvar)
     for n in 0:(Nt-1)
         phi_n = 2*pi*n/Nt
@@ -87,7 +102,8 @@ end
 
 function harmonic_equation(eqs::Vector{Equation}, states::Vector{Num}, tvar::Num, ω::Union{Tuple{Num,Num}}, N::Int;
         jac=false, intermod_order = 0, commensurate = nothing)
-
+    #TODO: Move commensurate functionality to backend @divxsharma
+    #TODO: Bring back 2D Collocation grid for irrational pump tones @divxsharma
     M = length(states)
     if M==1
         eqs = [eqs]
