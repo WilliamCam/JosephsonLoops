@@ -8,6 +8,7 @@ function substitute_to_fixpoint(expr, subs; max_iters = 20, transform = identity
     return expr
 end
 
+
 """
     get_solution(h_prob::HarmonicProblem, expression, order=1; time_domain_solution=false)
 
@@ -57,6 +58,7 @@ function get_solution(h_prob::HarmonicProblem, expression::Num, order::Union{Int
         harmonic_expr = expression_for_var(h_prob.harmonic_system, expression, order)
     end
     harmonic_expr = simplify(expand(harmonic_expr))
+    return harmonic_expr
     sol = h_prob.result.solution
     output_arr = Array{ComplexF64}(undef, size(sol)[2:end]...)
     apply_harmonic_expression!(output_arr, h_prob, harmonic_expr)
@@ -125,7 +127,7 @@ function reconstruct_from_observed(h_sys::HarmonicSystem, observed_var::Num)
 end
 
 
-function apply_harmonic_expression!(output::AbstractArray, h_prob::HarmonicProblem, expression::Complex{Num})
+function apply_harmonic_expression!(output::AbstractArray, h_prob, expression::Complex{Num})
     system = h_prob.harmonic_system.system
     result = h_prob.result.solution
     sweep = h_prob.parameter_sweep
@@ -157,9 +159,6 @@ function compile_expression(expr::Complex{Num}, system::ModelingToolkit.System, 
     )
     observed_subs = Dict(eq.lhs => eq.rhs for eq in observed(system)
                          if !(Symbolics.symtype(Symbolics.unwrap(eq.lhs)) <: AbstractArray))
-    # parameters absent from parameter_values fall back to their MTK defaults, so
-    # defaulted parameters (e.g. an unused second source tone) never survive as
-    # uncompilable symbols in the extracted expression
     default_vals = ModelingToolkit.defaults(system)
     fixed_params = Dict{Num, Float64}()
     for p in parameters(system)
