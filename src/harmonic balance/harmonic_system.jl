@@ -14,8 +14,6 @@ struct FourierBasis
     d_cos_coeffs::Symbolics.Arr{Num, 1}
     d_sin_coeffs::Symbolics.Arr{Num, 1}
 
-    # Symbolic second derivative variables (d²/dt² A₁) needed for the δ²·J₂ term that
-    # makes the linearised response exact in detuning (previously first-order only)
     d2_dc_coeff::Num
     d2_cos_coeffs::Symbolics.Arr{Num, 1}
     d2_sin_coeffs::Symbolics.Arr{Num, 1}
