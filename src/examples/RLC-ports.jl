@@ -73,13 +73,9 @@ p_gain = jls.plot(Ω_vec.*ωc./(2π*1e9), gain_dB,
     title="JPA gain — JosephsonLoops vs JosephsonCircuits.jl",
     lw=2, label="JosephsonLoops", legend=:topright)
 
-# ── Benchmark overlay ────────────────────────────────────────────────────────────────
-# Reference: the docs JPA run through mit_jpa_export.jl (from the JosephsonCircuits-MIT
-# project) → mit_jpa.csv. Verified 2026-08-24: N=2 gives peak 13.12 dB, 3 dB width
-# 12.0 MHz vs MIT 13.30 dB / 12 MHz, band median |Δ| = 0.0003 dB. The 0.18 dB peak gap
-# is pump truncation: N=3 closes it to 13.295 dB (jacobian build ≈3 min).
+
 using DelimitedFiles
-mit_csv = joinpath(@__DIR__, "..", "..", "mit_jpa.csv")
+mit_csv = joinpath(pkgdir(jls), "mit_jpa.csv") 
 if isfile(mit_csv)
     mit = readdlm(mit_csv, ',')
     jls.plot!(p_gain, mit[:, 1], mit[:, 2], lw=2, ls=:dash, label="JosephsonCircuits.jl")

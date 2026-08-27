@@ -11,40 +11,40 @@ end
 function solve!(linear_problem::LinearisedProblem; kwargs...)
     result = linear_problem.result.solution
     nonlinear_prob = linear_problem.problem
-    J₀, J₁ = linear_problem.harmonic_system.jacobian
+    J₀, J₁, J₂ = linear_problem.harmonic_system.jacobian
     sweep_space = linear_problem.parameter_sweep
 
     Ωp = linear_problem.harmonic_system.ω
-    single_tone = isequal(Ωp[2], Num(0))
 
     Ωs = linear_problem.Ωs
     δU = linear_problem.δU
 
     if isnothing(sweep_space)
         K = size(J₀,1)
-        sol = ModelingToolkit.solve(nonlinear_prob, kwargs...)
+        #TODO: ????
+        # gauge-free DC coefficients can make the Newton jacobian singular; fall back to LM
+        sol = try
+            ModelingToolkit.solve(nonlinear_prob; kwargs...)
+        catch
+            ModelingToolkit.solve(nonlinear_prob, NonlinearSolve.LevenbergMarquardt())
+        end
 
         working_point = Dict([var=>sol[var] for var in unknowns(linear_problem.harmonic_system.system)])
         numeric_substitution = merge(linear_problem.parameters, working_point)
 
         J₀ = Float64.(Symbolics.value.(substitute(J₀, numeric_substitution)))
         J₁ = Float64.(Symbolics.value.(substitute(J₁, numeric_substitution)))
+        J₂ = Float64.(Symbolics.value.(substitute(J₂, numeric_substitution)))
 
         U_small_signal = SVector{K}(δU)
-        if single_tone
-            Ωp_value = linear_problem.parameters[Ωp[1]]
-            for (column_index, Ω) in enumerate(Ωs)
-                mat = J₀ - 1im * (Ω - Ωp_value) * J₁
-                result[:, column_index] .= _linear_solve(mat, U_small_signal, column_index == 1)
-            end
-        else
-            for (pump_index, Ω_pump) in enumerate(Ωp)
-                Ωp_value = linear_problem.parameters[Ω_pump]
-                for (column_index, Ω) in enumerate(Ωs)
-                    mat = J₀ - 1im * (Ω - Ωp_value) * J₁
-                    output_array[:, pump_index, column_index] .= _linear_solve(mat, U_small_signal, column_index == 1)
-                end
-            end
+        # linearised around the single declared pump (tone 1): δ = Ω − ω1; the δ²J₂ term
+        # makes the response exact in δ for the truncated basis
+        Ωp_value = linear_problem.parameters[Ωp[1]]
+        #TODO: optional argument to only compute taylor expansion to second order (for speed)
+        for (column_index, Ω) in enumerate(Ωs)
+            δ = Ω - Ωp_value
+            mat = J₀ - 1im * δ * J₁ - δ^2 * J₂
+            result[:, column_index] .= _linear_solve(mat, U_small_signal, column_index == 1)
         end
     else
         #parameter sweep
@@ -72,9 +72,8 @@ function LinearisedProblem(harmonic_system::HarmonicSystem, parameters::Dict,
     system_unknowns = unknowns(system)
     _Nvars = size(harmonic_system.jacobian[1], 1)
 
-    # Will linearise around each pump tone if there is more than one
-    ω1, ω2 = harmonic_system.ω
-    isequal(ω2, Num(0)) ? results_size = [_Nvars, length(Ωs)] : results_size = [_Nvars, 2, length(Ωs)]
+    # Linearised around one declared pump (tone 1), so the response is always [vars, Ω]
+    results_size = [_Nvars, length(Ωs)]
     dep_params = Num[]
     #Preallocate results object
     #TODO: Support for linear parameter sweeps i.e. capacitance/resistance -> doesnt require re-solving NL system working point!

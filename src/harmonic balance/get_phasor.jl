@@ -64,7 +64,7 @@ function expression_for_var(h_sys::HarmonicSystem, var::Num, order::Union{Int,Tu
         pump_index, signal_index = order
         ωp, ωs = h_sys.ω
         I = Symbolics.coeff(expr, cos((pump_index * ωp + signal_index * ωs)*t))
-        Q = Symbolics.coeff(expr, sin((pump_index * ωp + signal_index * ωs)*t)) 
+        Q = Symbolics.coeff(expr, sin((pump_index * ωp + signal_index * ωs)*t))
         return Num.(I + 1im*Q)
     else
         return Num.(expr)
@@ -130,8 +130,17 @@ function compile_expression(expr::Complex{Num}, system::ModelingToolkit.System, 
     )
     observed_subs = Dict(eq.lhs => eq.rhs for eq in observed(system)
                          if !(Symbolics.symtype(Symbolics.unwrap(eq.lhs)) <: AbstractArray))
-    fixed_params = Dict(Num(p) => Float64(parameter_values[Num(p)]) for p in parameters(system)
-                        if !var_is_in(sweep_parameters, Num(p)) && haskey(parameter_values, Num(p)))
+    default_vals = ModelingToolkit.defaults(system)
+    fixed_params = Dict{Num, Float64}()
+    for p in parameters(system)
+        var_is_in(sweep_parameters, Num(p)) && continue
+        if haskey(parameter_values, Num(p))
+            fixed_params[Num(p)] = Float64(parameter_values[Num(p)])
+        else
+            v = get(default_vals, p, nothing)
+            v isa Number && (fixed_params[Num(p)] = Float64(v))
+        end
+    end
     inputs = vcat(input_syms, Symbolics.unwrap.(sweep_parameters)...)
     compiled_function = Symbolics.build_function(
         Symbolics.unwrap(Symbolics.substitute(substitute_to_fixpoint(expr, observed_subs), fixed_params)),

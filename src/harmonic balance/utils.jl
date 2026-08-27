@@ -128,13 +128,15 @@ function is_term(set, target_term)
 end
 
 
-function build_jacobians(rotated_system, vars, dvars)
-    # Columns of J0 follow `vars` and columns of J1 follow `dvars`; harmonic_equation
-    # assembles both in the same order, so column i of J1 is d/d(vars[i]').
+function build_jacobians(rotated_system, vars, dvars, d2vars = nothing)
+    
     _jac = Symbolics.jacobian(rotated_system, vars)
-    jac_0 = Num.((substitute(_jac, Dict(dvars .=> 0))))
+    zeroed = d2vars === nothing ? Dict(dvars .=> 0) : Dict(vcat(dvars, d2vars) .=> 0)
+    jac_0 = Num.((substitute(_jac, zeroed)))
     jac_1 = Symbolics.jacobian(rotated_system, dvars)
-    return jac_0, jac_1
+    d2vars === nothing && return jac_0, jac_1
+    jac_2 = Symbolics.jacobian(rotated_system, d2vars)
+    return jac_0, jac_1, jac_2
 end
 
 function rotate_to_harmonic_frame(M, N, Nt, harmonic_system)
@@ -171,6 +173,30 @@ function rotate_to_harmonic_frame(M, N, Nt, harmonic_system)
     return (rotated_system)
 end
 
+function rotate_to_harmonic_frame(M, n_ints::Vector{Int}, Nt::Int, harmonic_system)
+    block_rows = 2 * length(n_ints) + 1
+    total_rows = M * block_rows
+    total_cols = M * Nt
+    Γ_total = zeros(Num, total_rows, total_cols)
+    Γ_single = Matrix{Num}(undef, block_rows, Nt)
+    for j in 1:Nt
+        Γ_single[1, j] = Num(1//Nt)
+        for (k, nk) in enumerate(n_ints)
+            phase = nk * (j - 1) * (2π / Nt)
+            Γ_single[2k, j]     = Num((2//Nt) * cos(phase))
+            Γ_single[2k + 1, j] = Num((2//Nt) * sin(phase))
+        end
+    end
+    for d in 1:M
+        row_range = (d-1)*block_rows + 1 : d*block_rows
+        col_range = (d-1)*Nt + 1 : d*Nt
+        Γ_total[row_range, col_range] .= Γ_single
+    end
+    #ordering preserved: residual blocks are created per state in the same order
+    rotated_system = Γ_total * [equation.lhs for equation in harmonic_system]
+    return rotated_system
+end
+
 function diamond_truncation_indices(N::Int)
     indices = Tuple{Int, Int}[]
     for m in 0:N
@@ -204,13 +230,14 @@ end
 
 function construct_fourier_basis(Np::Int, states::Vector{Num}; intermod_order=0, single_tone = false)
     K = length(states)
-    @assert Np > 1 "Need at least one pump harmonic"
+    @assert Np >= 1 "Need at least one pump harmonic"
     coeff_labels = 'A':'Z'
     intermod_order > Np ? indices = diamond_truncation_indices(intermod_order) : indices = full_indices(Np, intermod_order, single_tone = single_tone)
     #TODO: add optinal argument to remove DC term
     N_terms = length(indices) - 1
     dc_terms = @variables DC[1:K]
     d_dc_terms = @variables d_DC[1:K]
+    d2_dc_terms = @variables d2_DC[1:K]
     #TODO: bigger system size
     fourier_basis_map = Dict{Num, FourierBasis}()
     @assert K < 13 "Have run out of letters in alphabet for state variables... will fix later"
@@ -225,6 +252,11 @@ function construct_fourier_basis(Np::Int, states::Vector{Num}; intermod_order=0,
         d_cos_sym_arr = (@variables $d_cos_labels[1:N_terms])[1]
         d_sin_sym_arr = (@variables $d_sin_labels[1:N_terms])[1]
 
+        cur_d2_DC_term = d2_DC[k]
+        d2_cos_labels, d2_sin_labels = Symbol("d2" * coeff_labels[2*k-1]), Symbol("d2" * coeff_labels[2*k])
+        d2_cos_sym_arr = (@variables $d2_cos_labels[1:N_terms])[1]
+        d2_sin_sym_arr = (@variables $d2_sin_labels[1:N_terms])[1]
+
         #Create varaible map
         index_map = Dict{Tuple{Tuple{Int,Int},Symbol}, Num}()
         index_map[(indices[1], :DC)] = cur_DC_term
@@ -232,7 +264,8 @@ function construct_fourier_basis(Np::Int, states::Vector{Num}; intermod_order=0,
             index_map[(indices[n+1], :Cos)] = cos_sym_arr[n]
             index_map[(indices[n+1], :Sin)] = sin_sym_arr[n]
         end
-        cur_basis = FourierBasis(cur_DC_term, cur_d_DC_term, cos_sym_arr, sin_sym_arr, d_cos_sym_arr, d_sin_sym_arr, indices, index_map)
+        cur_basis = FourierBasis(cur_DC_term, cur_d_DC_term, cos_sym_arr, sin_sym_arr, d_cos_sym_arr, d_sin_sym_arr,
+            cur_d2_DC_term, d2_cos_sym_arr, d2_sin_sym_arr, indices, index_map)
         fourier_basis_map[states[k]] = cur_basis
     end
     return fourier_basis_map

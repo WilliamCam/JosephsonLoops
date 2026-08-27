@@ -14,6 +14,12 @@ struct FourierBasis
     d_cos_coeffs::Symbolics.Arr{Num, 1}
     d_sin_coeffs::Symbolics.Arr{Num, 1}
 
+    # Symbolic second derivative variables (d²/dt² A₁) needed for the δ²·J₂ term that
+    # makes the linearised response exact in detuning (previously first-order only)
+    d2_dc_coeff::Num
+    d2_cos_coeffs::Symbolics.Arr{Num, 1}
+    d2_sin_coeffs::Symbolics.Arr{Num, 1}
+
     fourier_indicies::Vector{Tuple{Int,Int}}
     coeff_map::Dict{Tuple{Tuple{Int,Int},Symbol}, Num}
 end
@@ -25,7 +31,7 @@ struct HarmonicSystem
     N::Int
     harmonic_ansatz::Vector{Num}
     variable_map::Dict{Num, FourierBasis}
-    jacobian::Union{Tuple{Matrix{Num}, Matrix{Num}},Nothing}
+    jacobian::Union{Tuple{Matrix{Num}, Matrix{Num}}, Tuple{Matrix{Num}, Matrix{Num}, Matrix{Num}}, Nothing}
 end
 
 struct HarmonicResult
@@ -117,7 +123,8 @@ function HarmonicProblem(harmonic_system::HarmonicSystem, parameters::Dict;
     return HarmonicProblem(harmonic_system, nonlinear_prob, parameters, parameter_sweep, U₀, output)
 end
 
-function HarmonicSystem(sys, ω::Union{Num,Tuple{Num,Num}}, N::Int; tearing::Bool=true, determine_jacobian::Bool=false)
+function HarmonicSystem(sys, ω::Union{Num,Tuple{Num,Num}}, N::Int; tearing::Bool=true, determine_jacobian::Bool=false,
+        intermod_order::Int=0, commensurate::Union{Nothing,Tuple{Int,Int}}=nothing)
     # `typeof(ω) !== Tuple` was always true (Tuple{Num,Num} !== the UnionAll Tuple),
     # double-wrapping real two-tone inputs.
     if !(ω isa Tuple)
@@ -132,7 +139,8 @@ function HarmonicSystem(sys, ω::Union{Num,Tuple{Num,Num}}, N::Int; tearing::Boo
 
     eqs_arg    = length(states) == 1 ? eqs[1]         : eqs
     states_arg = length(states) == 1 ? Num(states[1]) : states
-    nonlinear_sys, X, variable_map, jac = harmonic_equation(eqs_arg, Num.(states_arg), tvar, ω, N; jac=determine_jacobian) 
+    nonlinear_sys, X, variable_map, jac = harmonic_equation(eqs_arg, Num.(states_arg), tvar, ω, N;
+        jac=determine_jacobian, intermod_order=intermod_order, commensurate=commensurate)
     
     sys_eqs, sys_vars = equations(nonlinear_sys), unknowns(nonlinear_sys)
     
