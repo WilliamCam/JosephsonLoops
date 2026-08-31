@@ -1,22 +1,10 @@
 #Netlist struct
 """
-    process_netlist(loops::Vector{Vector{String}}; mutual_coupling::Vector{Tuple{Int64, Int64}} = [], ext_flux::Vector{Int64} = []) -> CircuitNetlist
+    CircuitNetlist
 
-Processes a circuit netlist defined by loops and creates a `CircuitNetlist` structure containing the components, mutual coupling information, and external flux values.
-
-# Arguments
-- `loops::Vector{Vector{String}}`: A vector of vectors, where each inner vector represents a loop containing component names as strings.
-- `mutual_coupling::Vector{Tuple{Int64, Int64}}`: An optional vector of tuples representing mutual coupling between loops. Defaults to an empty vector.
-- `ext_flux::Vector{Bool}`: An optional vector of external flux offsets associated with the loops. Defaults to an empty vector.
-
-# Returns
-- `CircuitNetlist`: A `CircuitNetlist` object that encapsulates the processed information, including loops, mutual coupling, external flux, component mappings, and identified branches.
-
-# Example
-
-loops = [["R1", "C1"], ["I1", "R1"], ["J1", "L1"]]
-circuit = process_netlist(loops; mutual_coupling=[(1, 2)], ext_flux=[1])
-
+The parsed netlist produced by [`process_netlist`](@ref) and consumed by
+[`build_circuit`](@ref). Fields are `loops`, `mutual_coupling`, `ext_flux`, `components` and
+`branches`. Normally passed straight to `build_circuit` without touching its fields.
 """
 struct CircuitNetlist
     loops::Vector{Vector{String}}
@@ -46,6 +34,31 @@ function find_components(loops::Vector{Vector{String}})
     return component_loop_mapping, branches
 end
 
+"""
+    process_netlist(loops::Vector{Vector{String}}; mutual_coupling::Vector{Tuple{Int64, Int64}} = [], ext_flux::Vector{Bool} = []) -> CircuitNetlist
+
+Processes a circuit netlist defined by loops and creates a `CircuitNetlist` structure containing the components, mutual coupling information, and external flux values.
+
+# Arguments
+- `loops::Vector{Vector{String}}`: A vector of vectors, where each inner vector represents a loop containing component names as strings.
+- `mutual_coupling::Vector{Tuple{Int64, Int64}}`: An optional vector of loop index pairs. Each pair creates a plain
+  `Inductor` named `M` followed by the two loop indices, placed as a branch shared by both loops. This is the common
+  branch representation of mutual inductance in mesh analysis, so its strength is set through the ordinary `βL` of
+  that inductor, for example `M12.βL`. Defaults to an empty vector.
+- `ext_flux::Vector{Bool}`: An optional vector with one entry per loop. Each `true` entry threads that loop with an
+  `ExternalFlux` source named `Φₑ` followed by the loop index, whose flux is set through `Φₑ2.Φₑ` and so on. Loop
+  fluxes are in units of `Φ₀/2π`, so one flux quantum is `2π`. If given, its length must equal the number of loops.
+  Defaults to an empty vector, which is filled with `false`.
+
+# Returns
+- `CircuitNetlist`: A `CircuitNetlist` object that encapsulates the processed information, including loops, mutual coupling, external flux, component mappings, and identified branches.
+
+# Example
+
+loops = [["R1", "C1"], ["I1", "R1"], ["J1", "L1"]]
+circuit = process_netlist(loops; mutual_coupling=[(1, 2)], ext_flux=[false, true, false])
+
+"""
 function process_netlist(
     loops::Vector{Vector{String}}; 
     mutual_coupling::Vector{Tuple{Int,Int}} = Vector{Tuple{Int,Int}}(), 
@@ -78,7 +91,15 @@ Constructs a ModelingToolkit ODESystem from a CircuitNetlist by creating and con
   - `branches`: Vector of component names that form branches
 
 # Returns
-- A compiled ModelingToolkit ODESystem representing the circuit equations
+- `(model, u0, guesses)`. `model` is the compiled ModelingToolkit system. `guesses` maps every
+  unknown to 0.0. `u0` is ALWAYS EMPTY, because the line that would populate it is commented
+  out, so pass `guesses` wherever an initial state is required.
+
+# Component handles
+This function creates the component handles used to set parameters. `P1`, `J1`, `M12`, `Φₑ2`
+and so on are generated here as module level names taken from the netlist strings, which is
+why parameters can be written as `J1.α` without `J1` ever being defined by the caller. They do
+not exist before this call.
 
 # Details
 - Creates ModelingToolkit components based on first letter of component name:
@@ -98,9 +119,13 @@ circuit = process_netlist(loops)
 model = build_circuit(circuit)
 
 # Throws
-- `ArgumentError`: If an unrecognized component type is found in the netlist
-"""
+- `KeyError`: if a netlist name starts with a letter other than `I`, `R`, `C`, `J`, `L` or `P`.
+  Such a name is silently dropped during parsing and then fails here when it is looked up.
 
+!!! note
+    This function prints the branch names and the full component dictionary on every call.
+    There is no way to silence it.
+"""
 function build_circuit(circuit::CircuitNetlist; no_tearing = false)
     #Load circuit from netlist
     loops = circuit.loops

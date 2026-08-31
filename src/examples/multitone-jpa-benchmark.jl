@@ -29,8 +29,10 @@ ps = Dict(
 )
 Ω_vec = collect(2π*(4.5:0.001:5.0)*1e9/ωc)     # the docs grid
 
+# the commensurate integers are derived in the backend from the tone ratio:
+# 4.65:4.85 rationalizes to 93:97, snapping tone 2 by 430 Hz (reported via @info)
 @time sys_mt = jls.HarmonicSystem(model, (jls.P1.source.ω, jls.P1.source.ω₂), 2,
-    determine_jacobian = true, intermod_order = 3, commensurate = (93, 97))
+    determine_jacobian = true, intermod_order = 3, tones = (4.65001e9, 4.85001e9))
 
 # pump working point: amplitude ramp with LM, carrying the solution forward
 sysu = jls.unknowns(sys_mt.system)
@@ -76,4 +78,6 @@ else
     @warn "reference not found at $mit_csv — run mit_jpa_multitone_export.jl with the JosephsonCircuits-MIT project"
 end
 display(p_mt)
+# regenerates the figure used in the docs
+jls.savefig(p_mt, joinpath(pkgdir(jls), "docs", "images", "jpa-doubly-pumped.png"))
 

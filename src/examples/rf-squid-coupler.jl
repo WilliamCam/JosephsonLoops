@@ -13,6 +13,7 @@
 using JosephsonLoops
 using Symbolics
 using ModelingToolkit
+using DelimitedFiles
 using Revise
 const jls = JosephsonLoops
 
@@ -92,4 +93,22 @@ p = jls.plot(xlabel = "Norm_Ext_Flux", ylabel = "dB(S(2,1))",
 for (jβ, βL) in enumerate(βL_vals)
     jls.plot!(p, f_vals, S21_dB[:, jβ], lw = 2, label = "βL = $(βL)")
 end
+# overlay the JosephsonCircuits.jl reference (generate the csv once by running
+# mit_rf_squid_coupler.jl with the JosephsonCircuits-MIT project; same flux grid
+# and betaL columns, so the curves and the difference line up point by point)
+mit_csv = joinpath(pkgdir(jls), "mit_rf_squid_coupler.csv")
+if isfile(mit_csv)
+    mit = readdlm(mit_csv, ',')
+    for jβ in eachindex(βL_vals)
+        jls.plot!(p, mit[:, 1], Float64.(mit[:, jβ+1]), lw = 1.5, ls = :dash,
+                  color = :black, label = jβ == 1 ? "JosephsonCircuits.jl" : "")
+    end
+    Δ = S21_dB .- Float64.(mit[:, 2:end])
+    println("vs JosephsonCircuits.jl: max|Δ| = ", round(maximum(abs.(Δ)), digits = 2),
+            " dB, median |Δ| = ", round(sort(abs.(vec(Δ)))[end÷2+1], sigdigits = 3), " dB")
+else
+    @warn "reference not found at $mit_csv — run mit_rf_squid_coupler.jl with the JosephsonCircuits-MIT project"
+end
 display(p)
+# regenerates the figure used in the docs
+jls.savefig(p, joinpath(pkgdir(jls), "docs", "images", "rf-squid-coupler.png"))

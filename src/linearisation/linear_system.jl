@@ -8,6 +8,30 @@ struct LinearisedProblem
     result::HarmonicResult
 end
 
+"""
+    solve!(linear_problem::LinearisedProblem)
+
+Solves the small signal response at every probe frequency. Mutates and returns the result
+array.
+
+It first re-solves the nonlinear working point starting from `U₀`, then for each probe
+frequency forms `mat = J₀ - im*δ*J₁ - δ^2*J₂` with `δ = Ω - ω1` and solves against `δU`.
+
+The three jacobians are the orders of the response in the detuning. A probe at `Ω = ω1 + δ`
+puts a slowly rotating envelope on every Fourier coefficient, and each time derivative brings
+down a factor of `im*δ`. Because the circuit equations contain no derivative higher than
+second, the series terminates at `δ^2`, so this response is exact in the detuning for the
+chosen basis rather than a first order approximation.
+
+Two fallbacks are built in. The working point solve is wrapped in a bare `catch` that retries
+with Levenberg-Marquardt on any exception. If the linearised matrix is singular, which happens
+when gauge free DC coefficients leave a zero column, it falls back to a minimum norm solution
+and warns once.
+
+# Returns
+- the response array, also reachable as `linear_problem.result.solution`. Read it with
+  [`get_solution`](@ref).
+"""
 function solve!(linear_problem::LinearisedProblem; kwargs...)
     result = linear_problem.result.solution
     nonlinear_prob = linear_problem.problem
@@ -60,6 +84,41 @@ function _linear_solve(mat::AbstractMatrix, U::AbstractVector, warn_once::Bool)
     return LinearAlgebra.pinv(mat) * U
 end
 
+"""
+    LinearisedProblem(harmonic_system, parameters, δU, Ωs; U₀=nothing, parameter_sweep=nothing)
+
+Small signal problem: the response of the circuit to a weak probe on top of a fixed working
+point. This is what gives amplifier gain and S parameters.
+
+`harmonic_system` must have been built with `determine_jacobian = true`, which is asserted.
+
+# Arguments
+- `harmonic_system::HarmonicSystem`: built with `determine_jacobian = true`.
+- `parameters::Dict`: parameter values, including the pump tone. The linearisation is taken
+  around tone 1, whose value is read from here.
+- `δU::Vector{ComplexF64}`: the probe drive vector, from [`perturbation_response`](@ref).
+- `Ωs::Vector{Float64}`: the probe frequencies. Positional, after `δU`. A single frequency is
+  passed as `[Ω_probe]`.
+
+# Keywords
+- `U₀`: the working point, normally from an amplitude ramp. Without it the solve starts cold
+  and can land on the trivial root, which produces a flat gain curve that looks plausible.
+- `parameter_sweep`: accepted and used to size the result array, but see the warning below.
+
+# Returns
+- `LinearisedProblem`. Its result array is `[jacobian rows, length(Ωs)]`.
+
+!!! warning
+    The parameter sweep is not implemented. The sweep branch of [`solve!`](@ref) is empty, so
+    passing `parameter_sweep` returns those extra dimensions uninitialised.
+
+# Example
+
+δU  = perturbation_response(sys, P1.source.I, ps, amplitude = ps[P1.source.I])
+lin = LinearisedProblem(sys, ps, δU, Ω_vec, U₀ = U)
+solve!(lin)
+
+"""
 function LinearisedProblem(harmonic_system::HarmonicSystem, parameters::Dict,
     δU::Vector{ComplexF64}, Ωs::Vector{Float64}; 
     parameter_sweep::Union{Vector{Pair{Num, Vector{Float64}}}, Nothing}=nothing, 
@@ -102,6 +161,27 @@ end
 
 #TODO:: LinearisedProbelm(::HarmonicProblem)
 
+"""
+    get_solution(lin_prob::LinearisedProblem, expression, order=1)
+
+Reads one Fourier component of a solved small signal response.
+
+`expression` is any symbolic quantity in the model, not only a state. If it is an observed
+variable the ansatz is substituted back through the observed equations to reconstruct it.
+
+`order` names the Fourier slot. A tuple `(m, n)` is the coefficient of the `(m*ω1 + n*ω2)*t`
+term. A bare integer `k` is shorthand for `(k, 0)`, so `1` is the drive frequency and `0` is
+DC. For two tone problems `(1, -1)` is the mixing product at `ω1 - ω2`.
+
+Returns the complex phasor for that slot at every probe frequency, in normalised units.
+Multiply currents by `I₀` and voltages by `R₀*I₀` to return to SI.
+
+# Example
+
+I_sig = get_solution(lin, P1.i, 1) .* I₀
+V_sig = get_solution(lin, P1.dφ, 1) .* R₀ .* I₀
+
+"""
 function get_solution(lin_prob::LinearisedProblem, expression::Num, order::Union{Int,Tuple{Int,Int}} = 1)
     h_sys = lin_prob.harmonic_system
     expr_vars = Num.(get_variables(expression))
@@ -165,6 +245,32 @@ function apply_harmonic_expression!(output::AbstractArray, lin_prob::LinearisedP
 end
 
 #Creates system pertubation response in harmonic frame
+"""
+    perturbation_response(h_sys, source_param, parameters; amplitude=1.0)
+
+Builds the probe drive vector for a small modulation of one parameter, normally a source
+current. Pass the result to [`LinearisedProblem`](@ref).
+
+It differentiates the time domain residuals with respect to `source_param` and projects that
+sensitivity into the harmonic row layout. It asserts that the parameter actually appears in
+the time domain system.
+
+# Arguments
+- `h_sys::HarmonicSystem`: the system to perturb.
+- `source_param::Num`: the parameter being modulated, such as `P1.source.I`.
+- `parameters::Dict`: parameter values.
+
+# Keywords
+- `amplitude::Float64 = 1.0`: scale of the perturbation. For a gain calculation this cancels
+  in the ratio of reflected to incident wave, so the pump amplitude is a convenient choice.
+
+# Returns
+- `Vector{ComplexF64}` of length `length(eqs) * Nt`.
+
+!!! note
+    This function prints a raw symbolic expression on every call. That output is leftover
+    debugging, not a diagnostic.
+"""
 function perturbation_response(h_sys::HarmonicSystem, source_param::Num, parameters::Dict; amplitude::Float64 = 1.0)
     t = Num(ModelingToolkit.get_iv(h_sys.time_domain_system))
     eqs, _, _, _ = get_full_equations(h_sys.time_domain_system)
