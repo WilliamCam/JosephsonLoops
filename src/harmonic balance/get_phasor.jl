@@ -8,7 +8,36 @@ function substitute_to_fixpoint(expr, subs; max_iters = 20, transform = identity
     return expr
 end
 
-function get_solution(h_prob, expression::Num, order::Union{Int,Tuple{Int,Int}} = 1;
+
+"""
+    get_solution(h_prob::HarmonicProblem, expression, order=1; time_domain_solution=false)
+
+Reads one Fourier component of a solved harmonic balance sweep.
+
+`expression` is any symbolic quantity in the model, not only a state. If it is an observed
+variable the ansatz is substituted back through the observed equations to reconstruct it.
+
+`order` names the Fourier slot. A tuple `(m, n)` is the coefficient of the `(m*ω1 + n*ω2)*t`
+term. A bare integer `k` is shorthand for `(k, 0)`, so `1` is the drive frequency and `0` is
+DC. For two tone problems `(1, -1)` is the mixing product at `ω1 - ω2`.
+
+Set `time_domain_solution = true` to get the full reconstructed expression instead of one
+component.
+
+Returns the complex phasor for that slot at every sweep point, in normalised units. Multiply
+currents by `I₀` and voltages by `R₀*I₀` to return to SI.
+
+!!! warning
+    This only works when the `HarmonicProblem` was built with a `parameter_sweep`. Without
+    one it prints `Non sweep output` and returns an uninitialised array rather than raising,
+    so the values will be whatever was in memory.
+
+# Example
+
+I1 = get_solution(prob, P1.i, 1) .* I₀
+
+"""
+function get_solution(h_prob::HarmonicProblem, expression::Num, order::Union{Int,Tuple{Int,Int}} = 1;
     time_domain_solution::Bool = false)
     expr_vars = Num.(get_variables(expression))
     if time_domain_solution

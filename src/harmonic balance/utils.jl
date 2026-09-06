@@ -197,6 +197,39 @@ function rotate_to_harmonic_frame(M, n_ints::Vector{Int}, Nt::Int, harmonic_syst
     return rotated_system
 end
 
+# 2D torus (hyper-time) projection: samples live on the product grid
+# (θ1_i, θ2_j) = (2πi/Nt1, 2πj/Nt2), flattened with i outer / j inner to match the
+# sampler. Orthogonality is exact per axis (Nt = 2·max|index|+1, both odd), for ANY
+# tone ratio — ω1, ω2 never appear. Row order per state matches the 1D versions:
+# [DC, cos₁, sin₁, ...] in basis-slot order.
+function rotate_to_harmonic_frame(M, indices::Vector{Tuple{Int,Int}}, Nt1::Int, Nt2::Int, harmonic_system)
+    block_rows = 2 * length(indices) + 1
+    Nt = Nt1 * Nt2
+    total_rows = M * block_rows
+    total_cols = M * Nt
+    Γ_total = zeros(Num, total_rows, total_cols)
+    Γ_single = Matrix{Num}(undef, block_rows, Nt)
+    
+    chop(x) = abs(x) < 1e-12 ? 0.0 : x
+    for i in 0:(Nt1-1), j in 0:(Nt2-1)
+        col = i * Nt2 + j + 1
+        Γ_single[1, col] = Num(1//Nt)
+        for (k, (m, n)) in enumerate(indices)
+            phase = m * i * (2π / Nt1) + n * j * (2π / Nt2)
+            Γ_single[2k, col]     = Num((2//Nt) * chop(cos(phase)))
+            Γ_single[2k + 1, col] = Num((2//Nt) * chop(sin(phase)))
+        end
+    end
+    for d in 1:M
+        row_range = (d-1)*block_rows + 1 : d*block_rows
+        col_range = (d-1)*Nt + 1 : d*Nt
+        Γ_total[row_range, col_range] .= Γ_single
+    end
+    #ordering preserved: residual blocks are created per state in the same order
+    rotated_system = Γ_total * [equation.lhs for equation in harmonic_system]
+    return rotated_system
+end
+
 function diamond_truncation_indices(N::Int)
     indices = Tuple{Int, Int}[]
     for m in 0:N

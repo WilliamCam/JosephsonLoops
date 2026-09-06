@@ -50,6 +50,25 @@ struct HarmonicProblem
 end
 
 
+"""
+    solve!(harmonic_problem::HarmonicProblem; continuation=true)
+
+Solves the harmonic balance problem at every point of its parameter sweep. Mutates and
+returns the solution array.
+
+With `continuation = true`, each sweep point starts from the previous converged solution.
+This is what lets a sweep follow a nonlinear branch, such as a Duffing response or a
+hysteretic SQUID. When a multi dimensional sweep begins a new row it resets to `U₀` and
+prints `Paused continuation`.
+
+!!! warning
+    Keyword arguments are not forwarded correctly to the underlying solver, so solver options
+    and algorithm choice cannot be passed through this method.
+
+# Returns
+- the solution array, also reachable as `harmonic_problem.result.solution`. Read it with
+  `get_solution`.
+"""
 function solve!(harmonic_problem::HarmonicProblem; continuation::Bool = true, kwargs...)
     result = harmonic_problem.result.solution
     nonlinear_prob = harmonic_problem.problem
@@ -90,6 +109,39 @@ function solve!(harmonic_problem::HarmonicProblem; continuation::Bool = true, kw
     return result
 end
 
+"""
+    HarmonicProblem(harmonic_system, parameters; parameter_sweep=nothing, U₀=nothing)
+
+Wraps a [`HarmonicSystem`](@ref) with numeric parameter values, ready for [`solve!`](@ref).
+
+This is the steady state problem, meaning the circuit's own response to its drive. For the
+response to a weak probe on top of a working point, use `LinearisedProblem` instead.
+
+# Arguments
+- `harmonic_system::HarmonicSystem`: from [`HarmonicSystem`](@ref).
+- `parameters::Dict`: maps each parameter symbol to its value. This must end up as
+  `Dict{Num,Float64}`. Writing an integer such as `J1.α => 1` instead of `1.0` widens the
+  dictionary and fails later inside `get_solution` rather than here.
+
+# Keywords
+- `parameter_sweep`: a vector of pairs from a parameter to the vector of values it takes. The
+  swept parameter must be absent from `parameters`, so delete it first.
+- `U₀`: initial state vector. Defaults to zeros.
+
+# Returns
+- `HarmonicProblem`
+
+!!! note
+    `get_solution` on a `HarmonicProblem` only works when a `parameter_sweep` was supplied.
+    Without one it prints `Non sweep output` and returns an uninitialised array rather than
+    raising an error.
+
+# Example
+
+sweep_params = delete!(ps, P1.source.ω)
+prob = HarmonicProblem(sys, sweep_params, parameter_sweep = [P1.source.ω => ω_vec])
+
+"""
 function HarmonicProblem(harmonic_system::HarmonicSystem, parameters::Dict; 
         parameter_sweep::Union{Vector{Pair{Num, Vector{Float64}}}, Nothing}=nothing, 
         U₀::Union{Vector{Float64},Nothing} = nothing, 
@@ -123,12 +175,84 @@ function HarmonicProblem(harmonic_system::HarmonicSystem, parameters::Dict;
     return HarmonicProblem(harmonic_system, nonlinear_prob, parameters, parameter_sweep, U₀, output)
 end
 
+"""
+    HarmonicSystem(sys, ω, N; tearing=true, determine_jacobian=false, intermod_order=0,
+                   tones=nothing, commensurate_tol=1e-6, max_denominator=1000, oversample=2)
+
+Builds the harmonic balance system for `sys`, a model returned by [`build_circuit`](@ref).
+
+The circuit solution is written as a Fourier series in the drive tones, substituted into the
+circuit equations, sampled on a collocation grid, and projected back onto the basis. The
+result is an algebraic system in the Fourier coefficients.
+
+# Arguments
+- `sys`: the compiled model from `build_circuit`.
+- `ω::Union{Num,Tuple{Num,Num}}`: the drive parameter, or a tuple of two for a two tone problem.
+- `N::Int`: number of harmonics of the drive kept in the basis. `N = 2` keeps DC, the
+  fundamental and the second harmonic. Raising it improves accuracy and costs build time.
+
+# Keywords
+- `determine_jacobian::Bool = false`: also build the jacobians needed by
+  [`LinearisedProblem`](@ref). Set this whenever small signal analysis will follow. It forces
+  `tearing = false`, because the linearised solve needs every variable to survive into the
+  final model.
+- `intermod_order::Int = 0`: admits mixing products `(m, n)` at `m*ω1 + n*ω2` subject to
+  `m + |n| <= intermod_order`. Parametric conversion between two tones lives in these slots,
+  so a strongly driven two tone circuit needs at least order 3. Order 0 keeps only pure
+  harmonics of each tone and is not a useful setting for such a circuit.
+- `tones::Union{Nothing,Tuple{<:Real,<:Real}} = nothing`: the two drive frequencies as plain
+  numbers. Only their ratio is used, so any consistent unit works. If the ratio is near a
+  small rational number a one dimensional commensurate grid is used and the second tone is
+  shifted slightly to make the ratio exact. Otherwise, or if omitted, a two dimensional torus
+  grid is used, which allows any ratio with no shift. The choice and any shift are reported.
+- `commensurate_tol::Real = 1e-6`: relative tolerance for accepting a rational tone ratio.
+- `max_denominator::Int = 1000`: largest integers allowed in that ratio.
+- `oversample::Int = 2`: extra collocation points beyond the minimum, which keeps aliased
+  content off the occupied basis slots.
+
+# Returns
+- `HarmonicSystem`: pass to [`HarmonicProblem`](@ref) or [`LinearisedProblem`](@ref).
+
+# Example
+
+sys = HarmonicSystem(model, P1.source.ω, 2, determine_jacobian = true)
+
+# two tones through one port
+sys = HarmonicSystem(model, (P1.source.ω, P1.source.ω₂), 2,
+                     determine_jacobian = true, intermod_order = 3,
+                     tones = (4.65001e9, 4.85001e9))
+
+"""
 function HarmonicSystem(sys, ω::Union{Num,Tuple{Num,Num}}, N::Int; tearing::Bool=true, determine_jacobian::Bool=false,
-        intermod_order::Int=0, commensurate::Union{Nothing,Tuple{Int,Int}}=nothing)
+        intermod_order::Int=0, tones::Union{Nothing,Tuple{<:Real,<:Real}}=nothing,
+        commensurate_tol::Real=1e-6, max_denominator::Int=1000, oversample::Int=2)
     # `typeof(ω) !== Tuple` was always true (Tuple{Num,Num} !== the UnionAll Tuple),
     # double-wrapping real two-tone inputs.
     if !(ω isa Tuple)
         ω = (ω, Num(0))
+    end
+
+    # Two-tone grid selection, all in the backend (no integers in the API):
+    #  * `tones` given (the pump frequencies as plain numbers, any consistent units —
+    #    only the ratio is used) and the ratio is within commensurate_tol of a small
+    #    rational: 1D commensurate grid (ω1 = p·ω0, ω2 = q·ω0), tone 2 snapped.
+    #  * otherwise (no tones, or a nearly incommensurate ratio): 2D torus grid — both
+    #    tones stay fully symbolic, any ratio solvable, no snapping.
+    commensurate = nothing
+    if !isequal(ω[2], Num(0))
+        if tones === nothing
+            @info "two-tone HB: no tones given — using the 2D torus grid (any tone ratio, both tones symbolic)"
+        else
+            rat = rationalize(Int, float(tones[2] / tones[1]), tol = commensurate_tol)
+            p, q = denominator(rat), numerator(rat)
+            if max(p, q) > max_denominator
+                @info "tone ratio $(tones[2]/tones[1]) has no rational form with integers ≤ $max_denominator within tol = $commensurate_tol — using the 2D torus grid"
+            else
+                snapped = (q / p) * tones[1]
+                @info "commensurate two-tone grid: ω1:ω2 = $p:$q, tone 2 snapped to $(snapped) (relative shift $(abs(snapped / tones[2] - 1)))"
+                commensurate = (p, q)
+            end
+        end
     end
 
     #use of jacobian in linearisation requires all system variable to be present in final model
@@ -140,7 +264,8 @@ function HarmonicSystem(sys, ω::Union{Num,Tuple{Num,Num}}, N::Int; tearing::Boo
     eqs_arg    = length(states) == 1 ? eqs[1]         : eqs
     states_arg = length(states) == 1 ? Num(states[1]) : states
     nonlinear_sys, X, variable_map, jac = harmonic_equation(eqs_arg, Num.(states_arg), tvar, ω, N;
-        jac=determine_jacobian, intermod_order=intermod_order, commensurate=commensurate)
+        jac=determine_jacobian, intermod_order=intermod_order, commensurate=commensurate,
+        oversample=oversample)
     
     sys_eqs, sys_vars = equations(nonlinear_sys), unknowns(nonlinear_sys)
     
