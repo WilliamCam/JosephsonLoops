@@ -67,6 +67,7 @@ f_vec = collect(4.5:0.001:5.0)
 @time sys = jls.HarmonicSystem(model, jls.P1.source.ω, 2, determine_jacobian = true)
 
 # ---- steady state: sweep the drive frequency ----------------------------------------
+
 # The swept parameter must be absent from the fixed dict, and solve! continues from the
 # previous point. S11 comes from the package's own port expression rather than by hand.
 sweep_ps = delete!(copy(ps), jls.P1.source.ω)
