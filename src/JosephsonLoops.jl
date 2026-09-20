@@ -17,4 +17,4 @@ include("harmonic balance/get_phasor.jl")
 include("harmonic balance/colocation.jl")
 include("linearisation/linear_system.jl")
 
-end # module JLoop
+end # module JosephsonLoops

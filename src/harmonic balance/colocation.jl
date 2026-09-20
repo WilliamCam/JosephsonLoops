@@ -7,7 +7,7 @@ function sample_collocation_grid_2D!(residuals, Nt_1, Nt_2, res_expr, ω1, ω2, 
     for i in 0:(Nt_1-1)
         for j in 0:(Nt_2-1)
             # Calculate the specific time point t_{i,j}
-            # This covers the 2D torus without needing explicit theta variables
+            # This covers the two dimensional phase grid without explicit phase variables
             t_sample = (i * 2 * pi) / (Nt_1 * ω1) + (j * 2 * pi) / (Nt_2 * ω2)
             # Substitute the actual numerical time value directly into t
             res_at_coll = substitute(res_expr, Dict(tvar => t_sample))
@@ -24,7 +24,7 @@ function sample_collocation_grid!(residuals, Nt, res_expr, ω1, tvar)
     end
 end
 
-# Torus (hyper-time) sampler for arbitrary tone ratios: the residual's trig has been
+# Two dimensional phase sampler for arbitrary tone ratios: the residual's trig has been
 # retagged from (m·ω1+n·ω2)·t to the independent phases m·θ1+n·θ2, so every sample is
 # a pure number while ω1, ω2 stay fully symbolic. Sample order (i outer, j inner) must
 # match the 2D rotate_to_harmonic_frame column order.
@@ -112,12 +112,8 @@ function harmonic_solution_symbolic_derrivative(fourier_basis::FourierBasis, ω1
 end
 
 function harmonic_equation(eqs::Vector{Equation}, states::Vector{Num}, tvar::Num, ω::Union{Tuple{Num,Num}}, N::Int;
-    #TODO: Move commensurate functionality to backend @divxsharma
-    #TODO: Bring back 2D Collocation grid for irrational pump tones @divxsharma
+        jac=false, intermod_order = 0, commensurate = nothing, oversample::Int = 1)
     M = length(states)
-    if M==1
-        eqs = [eqs]
-    end
     @assert (M == length(eqs)) "System does not have the same number of equations as state variables"
     @assert length(ω) <= 2 "maximum of two tones supported"
 
@@ -149,7 +145,7 @@ function harmonic_equation(eqs::Vector{Equation}, states::Vector{Num}, tvar::Num
             end
             @assert Nt_two_tone > 0 "mixing products collide at every grid size — change (p, q) or the truncation"
         else
-            # 2D torus (hyper-time) grid: any tone ratio, ω1/ω2 stay symbolic. The two
+            # Two dimensional phase grid: any tone ratio, ω1/ω2 stay symbolic. The two
             # phases are sampled independently at their per-axis Nyquist sizes, and the
             # slot trig is retagged from (m·ω1+n·ω2)·t to m·θ1+n·θ2 before sampling —
             # the tones never meet a trig argument, so no rational ratio is needed.
@@ -213,7 +209,7 @@ function harmonic_equation(eqs::Vector{Equation}, states::Vector{Num}, tvar::Num
         d_harmonic_eqs = substitute(eqs, jac_subs)
     end
     # 1D grids (single-tone / commensurate): sample over one period, ω2 pinned rational.
-    # 2D grid (torus): retag the slot trig to θ1/θ2 and sample the phase lattice.
+    # 2D grid: retag the slot trig to θ1/θ2 and sample the phase lattice.
     torus = !single_tone && commensurate === nothing
     Nt = single_tone ? 2*N_terms-1 : (torus ? Nt1*Nt2 : Nt_two_tone)
     ω_grid = (single_tone || torus) ? ω1 : (1 // p) * ω1

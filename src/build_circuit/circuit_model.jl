@@ -71,7 +71,7 @@ function process_netlist(
         flux_vector = ext_flux
     end
     if length(flux_vector) != length(loops)
-        throw(ArgumentError("Mutual flux vector must be equal to number of circuit loops"))
+        throw(ArgumentError("ext_flux must have one entry per circuit loop"))
     end
     component_loop_mapping, branches = find_components(loops)
     circuit = CircuitNetlist(loops, mutual_coupling, flux_vector, component_loop_mapping, branches)
@@ -172,7 +172,7 @@ function build_circuit(circuit::CircuitNetlist; no_tearing = false)
             built_components[j] = new_c
             built_ports[j] = new_c
         else
-            throw(ArgumentError("Error: Netlist component was not recognised.Check docs for supported cirucit components and naming conventions."))
+            throw(ArgumentError("netlist component $j was not recognised; supported prefixes are I, R, C, J, L and P"))
         end
     end
 

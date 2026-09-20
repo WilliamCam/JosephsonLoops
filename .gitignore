@@ -1,0 +1,15 @@
+# macOS and Windows file manager junk
+.DS_Store
+Thumbs.db
+
+# editor state
+.vscode/
+*.swp
+*~
+
+# Julia
+Manifest.toml
+/docs/build/
+
+# output written by the examples and the reference export scripts
+/jl_*.csv
