@@ -267,9 +267,6 @@ the time domain system.
 # Returns
 - `Vector{ComplexF64}` of length `length(eqs) * Nt`.
 
-!!! note
-    This function prints a raw symbolic expression on every call. That output is leftover
-    debugging, not a diagnostic.
 """
 function perturbation_response(h_sys::HarmonicSystem, source_param::Num, parameters::Dict; amplitude::Float64 = 1.0)
     t = Num(ModelingToolkit.get_iv(h_sys.time_domain_system))
@@ -299,7 +296,6 @@ function perturbation_response(h_sys::HarmonicSystem, source_param::Num, paramet
         isequal(Symbolics.simplify(eq), Num(0)) && continue
         base = (k - 1) * Nt
         U[base + 1] -= amplitude * Symbolics.substitute(eq, zero_subs)
-        print(Symbolics.substitute(eq, zero_subs)) 
         for n in eachindex(fourier_indicies)
             if fourier_indicies[n] == (0,0)
                 continue
@@ -319,28 +315,6 @@ function perturbation_response(h_sys::HarmonicSystem, source_param::Num, paramet
     return U
 end
 
-function apply_harmonic_expression!(output::AbstractArray, h_prob::LinearProblem, expression::Complex{Num})
-    system = h_prob.harmonic_system.system
-    result = h_prob.result.solution
-    sweep = h_prob.parameter_sweep
-    sweep_params = h_prob.result.dependent_parameters
-    if !isnothing(sweep)
-        output_func = compile_expression(expression, system, h_prob.parameters, sweep_parameters = sweep_params)
-        input_vec = similar(result, size(result, 1) + length(sweep))
-        state_len = size(result, 1)
-
-        @views for (linear_idx, cart_index) in enumerate(CartesianIndices(axes(result)[2:end]))
-
-            input_vec[1:state_len] .= result[:, cart_index]
-
-            for (idx, param_sweep) in enumerate(sweep)
-                p_vals = last(param_sweep)
-                input_vec[state_len + idx] = p_vals[linear_idx]
-            end
-
-            output[cart_index] = output_func(input_vec)
-        end
-    else
-        print("Non sweep output")
-    end
-end
+# NOTE: a second apply_harmonic_expression! used to sit here, dispatching on LinearProblem,
+# which is SciMLBase's linear system type and not this package's LinearisedProblem. It was
+# unreachable, and a duplicate of the HarmonicProblem method in src/harmonic balance/get_phasor.jl.

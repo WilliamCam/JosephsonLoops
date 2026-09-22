@@ -75,7 +75,7 @@ function solve!(harmonic_problem::HarmonicProblem; continuation::Bool = true, kw
     sweep_space = harmonic_problem.parameter_sweep
     continuation_axis = 1
 
- #continuation, not sure if needed ask will 
+    # the sweep starts from U₀ and, with continuation, from each converged point after that
     working_prob = remake(nonlinear_prob; u0 = copy(harmonic_problem.U₀))
 
     if isnothing(sweep_space)
@@ -203,8 +203,9 @@ result is an algebraic system in the Fourier coefficients.
 - `tones::Union{Nothing,Tuple{<:Real,<:Real}} = nothing`: the two drive frequencies as plain
   numbers. Only their ratio is used, so any consistent unit works. If the ratio is near a
   small rational number a one dimensional commensurate grid is used and the second tone is
-  shifted slightly to make the ratio exact. Otherwise, or if omitted, a two dimensional torus
-  grid is used, which allows any ratio with no shift. The choice and any shift are reported.
+  shifted slightly to make the ratio exact. Otherwise, or if omitted, the two tone phases are
+  sampled independently, which allows any ratio with no shift. The choice and any shift are
+  reported when the system is built.
 - `commensurate_tol::Real = 1e-6`: relative tolerance for accepting a rational tone ratio.
 - `max_denominator::Int = 1000`: largest integers allowed in that ratio.
 - `oversample::Int = 2`: extra collocation points beyond the minimum, which keeps aliased
@@ -236,17 +237,17 @@ function HarmonicSystem(sys, ω::Union{Num,Tuple{Num,Num}}, N::Int; tearing::Boo
     #  * `tones` given (the pump frequencies as plain numbers, any consistent units —
     #    only the ratio is used) and the ratio is within commensurate_tol of a small
     #    rational: 1D commensurate grid (ω1 = p·ω0, ω2 = q·ω0), tone 2 snapped.
-    #  * otherwise (no tones, or a nearly incommensurate ratio): 2D torus grid — both
-    #    tones stay fully symbolic, any ratio solvable, no snapping.
+    #  * otherwise (no tones, or a nearly incommensurate ratio): a two dimensional phase
+    #    grid, so both tones stay fully symbolic, any ratio is solvable and nothing is snapped.
     commensurate = nothing
     if !isequal(ω[2], Num(0))
         if tones === nothing
-            @info "two-tone HB: no tones given — using the 2D torus grid (any tone ratio, both tones symbolic)"
+            @info "two tone harmonic balance: no tones given, sampling the two phases independently (any tone ratio, both tones symbolic)"
         else
             rat = rationalize(Int, float(tones[2] / tones[1]), tol = commensurate_tol)
             p, q = denominator(rat), numerator(rat)
             if max(p, q) > max_denominator
-                @info "tone ratio $(tones[2]/tones[1]) has no rational form with integers ≤ $max_denominator within tol = $commensurate_tol — using the 2D torus grid"
+                @info "tone ratio $(tones[2]/tones[1]) has no rational form with integers <= $max_denominator within tol = $commensurate_tol, sampling the two phases independently"
             else
                 snapped = (q / p) * tones[1]
                 @info "commensurate two-tone grid: ω1:ω2 = $p:$q, tone 2 snapped to $(snapped) (relative shift $(abs(snapped / tones[2] - 1)))"
@@ -261,9 +262,10 @@ function HarmonicSystem(sys, ω::Union{Num,Tuple{Num,Num}}, N::Int; tearing::Boo
     tvar = Num(ModelingToolkit.get_iv(sys))
     eqs, states, _, _ = get_full_equations(sys)
 
-    eqs_arg    = length(states) == 1 ? eqs[1]         : eqs
-    states_arg = length(states) == 1 ? Num(states[1]) : states
-    nonlinear_sys, X, variable_map, jac = harmonic_equation(eqs_arg, Num.(states_arg), tvar, ω, N;
+    # harmonic_equation takes vectors. A single state system used to be unwrapped to
+    # scalars here, which no method ever accepted, so a one degree of freedom system such
+    # as a Duffing oscillator raised a MethodError.
+    nonlinear_sys, X, variable_map, jac = harmonic_equation(eqs, Num.(states), tvar, ω, N;
         jac=determine_jacobian, intermod_order=intermod_order, commensurate=commensurate,
         oversample=oversample)
     

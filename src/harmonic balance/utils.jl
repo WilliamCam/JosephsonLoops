@@ -197,7 +197,7 @@ function rotate_to_harmonic_frame(M, n_ints::Vector{Int}, Nt::Int, harmonic_syst
     return rotated_system
 end
 
-# 2D torus (hyper-time) projection: samples live on the product grid
+# Two dimensional phase projection: samples live on the product grid
 # (θ1_i, θ2_j) = (2πi/Nt1, 2πj/Nt2), flattened with i outer / j inner to match the
 # sampler. Orthogonality is exact per axis (Nt = 2·max|index|+1, both odd), for ANY
 # tone ratio — ω1, ω2 never appear. Row order per state matches the 1D versions:

@@ -58,7 +58,6 @@ function get_solution(h_prob::HarmonicProblem, expression::Num, order::Union{Int
         harmonic_expr = expression_for_var(h_prob.harmonic_system, expression, order)
     end
     harmonic_expr = simplify(expand(harmonic_expr))
-    return harmonic_expr
     sol = h_prob.result.solution
     output_arr = Array{ComplexF64}(undef, size(sol)[2:end]...)
     apply_harmonic_expression!(output_arr, h_prob, harmonic_expr)
@@ -137,13 +136,16 @@ function apply_harmonic_expression!(output::AbstractArray, h_prob, expression::C
         input_vec = similar(result, size(result, 1) + length(sweep))
         state_len = size(result, 1)
 
-        @views for (linear_idx, cart_index) in enumerate(CartesianIndices(axes(result)[2:end]))
+        @views for cart_index in CartesianIndices(axes(result)[2:end])
 
             input_vec[1:state_len] .= result[:, cart_index]
 
             for (idx, param_sweep) in enumerate(sweep)
                 p_vals = last(param_sweep)
-                input_vec[state_len + idx] = p_vals[linear_idx]
+                # each swept parameter is indexed by ITS OWN axis of the grid. Indexing
+                # every one of them with a single running counter happens to be right for a
+                # one dimensional sweep and runs off the end of the second vector otherwise.
+                input_vec[state_len + idx] = p_vals[cart_index[idx]]
             end
 
             output[cart_index] = output_func(input_vec)

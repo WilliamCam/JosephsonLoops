@@ -26,7 +26,7 @@ jpa = hbsolve(ws, wp, sources, (8,), (16,), circuit, circuitdefs)
 S = jpa.linearized.S(outputmode=(0,), outputport=1, inputmode=(0,), inputport=1, freqindex=:)
 gain_dB = 10 .* log10.(abs2.(S))
 
-out = raw"C:\Users\Divyank Sharma\OneDrive\Desktop\thesis\JosephsonLoops\mit_jpa.csv"
+out = joinpath(@__DIR__, "mit_jpa.csv")     # next to this script, whatever machine it runs on
 writedlm(out, [collect(ws) ./ (2π*1e9)  gain_dB], ',')
 println("wrote $out  ($(length(gain_dB)) points)  peak $(round(maximum(gain_dB), digits=2)) dB @ ",
         round(ws[argmax(gain_dB)]/(2π*1e9), digits=4), " GHz")
