@@ -8,6 +8,39 @@ struct LinearisedProblem
     result::HarmonicResult
 end
 
+function _show_linearised_problem(io::IO, problem::LinearisedProblem)
+    print(io, "LinearisedProblem\n")
+    print(io, "  harmonic system: ", problem.harmonic_system.N, " harmonics, ",
+        length(problem.harmonic_system.harmonic_ansatz), " coefficients\n")
+    print(io, "  parameters: ", length(problem.parameters), "\n")
+    if isempty(problem.Ωs)
+        print(io, "  probe frequencies: none\n")
+    else
+        print(io, "  probe frequencies: ", length(problem.Ωs), " (",
+            first(problem.Ωs), " to ", last(problem.Ωs), ")\n")
+    end
+    print(io, "  probe drive size: ", length(problem.δU), "\n")
+    if isnothing(problem.parameter_sweep)
+        print(io, "  parameter sweep: none\n")
+    else
+        print(io, "  parameter sweep: ",
+            [(sweep.first, length(sweep.second)) for sweep in problem.parameter_sweep], "\n")
+    end
+    jacobian = problem.harmonic_system.jacobian
+    print(io, "  jacobian: ", isnothing(jacobian) ? "not computed" : "$(length(jacobian)) orders", "\n")
+    print(io, "  result: ", size(problem.result.solution))
+end
+
+function Base.show(io::IO, ::MIME"text/plain", problem::LinearisedProblem)
+    _show_linearised_problem(io, problem)
+end
+
+function Base.show(io::IO, problem::LinearisedProblem)
+    print(io, "LinearisedProblem(probes=", length(problem.Ωs),
+        ", result_size=", size(problem.result.solution), ")")
+end
+
+
 """
     solve!(linear_problem::LinearisedProblem)
 

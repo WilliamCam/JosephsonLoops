@@ -49,6 +49,80 @@ struct HarmonicProblem
     result::HarmonicResult
 end
 
+function _show_harmonic_system(io::IO, sys::HarmonicSystem)
+    print(io, "HarmonicSystem\n")
+    print(io, "  Pump tones: ", sys.ω, "\n")
+    print(io, "  harmonics: ", sys.N, "\n")
+    print(io, "  Fourier variables: ", length(sys.variable_map), "\n")
+    print(io, "  equations: ", length(equations(sys.system)), "\n")
+    jacobian_order = isnothing(sys.jacobian) ? "not computed" : "Yes"
+    print(io, "  jacobians: ", jacobian_order, "\n")
+end
+
+function _show_fourier_basis(io::IO, basis::FourierBasis)
+    print(io, "FourierBasis\n")
+    print(io, "  harmonics: ", length(basis.fourier_indicies), "\n")
+    print(io, "  indices: ", basis.fourier_indicies, "\n")
+    print(io, "  coefficient map entries: ", length(basis.coeff_map), "\n")
+    print(io, "  first derivatives: ", length(basis.d_cos_coeffs) + length(basis.d_sin_coeffs), "\n")
+    print(io, "  second derivatives: ", length(basis.d2_cos_coeffs) + length(basis.d2_sin_coeffs), "\n")
+end
+
+function _show_harmonic_result(io::IO, result::HarmonicResult)
+    print(io, "HarmonicResult\n")
+    print(io, "  dependent parameters: ", result.dependent_parameters, "\n")
+    print(io, "  solution size: ", size(result.solution), "\n")
+    print(io, "  solution element type: ", eltype(result.solution))
+end
+
+function _show_harmonic_problem(io::IO, problem::HarmonicProblem)
+    print(io, "HarmonicProblem\n")
+    print(io, "  system: ", problem.harmonic_system.N, " harmonics, ",
+        length(problem.harmonic_system.harmonic_ansatz), " coefficients\n")
+    print(io, "  parameters: ", length(problem.parameters), "\n")
+    if isnothing(problem.parameter_sweep)
+        print(io, "  parameter sweep: none\n")
+    else
+        print(io, "  parameter sweep: ",
+            [(sweep.first, length(sweep.second)) for sweep in problem.parameter_sweep], "\n")
+    end
+    print(io, "  initial state size: ", length(problem.U₀), "\n")
+    print(io, "  result: ", size(problem.result.solution))
+end
+
+function Base.show(io::IO, ::MIME"text/plain", basis::FourierBasis)
+    _show_fourier_basis(io, basis)
+end
+
+function Base.show(io::IO, basis::FourierBasis)
+    print(io, "FourierBasis(", length(basis.fourier_indicies), " harmonics)")
+end
+
+function Base.show(io::IO, ::MIME"text/plain", sys::HarmonicSystem)
+    _show_harmonic_system(io, sys)
+end
+
+function Base.show(io::IO, sys::HarmonicSystem)
+    print(io, "HarmonicSystem(N=", sys.N, ", coefficients=", length(sys.harmonic_ansatz), ")")
+end
+
+function Base.show(io::IO, ::MIME"text/plain", result::HarmonicResult)
+    _show_harmonic_result(io, result)
+end
+
+function Base.show(io::IO, result::HarmonicResult)
+    print(io, "HarmonicResult(size=", size(result.solution), ")")
+end
+
+function Base.show(io::IO, ::MIME"text/plain", problem::HarmonicProblem)
+    _show_harmonic_problem(io, problem)
+end
+
+function Base.show(io::IO, problem::HarmonicProblem)
+    print(io, "HarmonicProblem(parameters=", length(problem.parameters),
+        ", result_size=", size(problem.result.solution), ")")
+end
+
 
 """
     solve!(harmonic_problem::HarmonicProblem; continuation=true)
