@@ -15,40 +15,37 @@
 # mit_rf_squid_coupler.jl, which writes mit_rf_squid_coupler.csv.
 
 using JosephsonLoops
-using Symbolics
-using DelimitedFiles
-const jls = JosephsonLoops
+using Plots
 
 # ---- circuit ----------------------------------------------------------------------
 # port loop 1 | SQUID loop, flux threaded | port loop 2
 loops = [["P1", "L1"], ["L1", "J1", "L2"], ["L2", "P2"]]
-circuit = jls.process_netlist(loops, ext_flux = [false, true, false])
-model, u0, guesses = jls.build_circuit(circuit)
+circuit = process_netlist(loops, ext_flux = [false, true, false])
+rf_squid, u0, guesses = build_circuit(circuit)
 
 # ---- normalisation and parameters ---------------------------------------------------
 Ic  = 5.0e-6                         # the paper's junction
 I₀  = Ic                             # so J1.α = 1 and each side of the loop is 0.5*βL
 R₀  = 50.0
-ωc  = R₀*I₀/(jls.Φ₀/2π)
+ωc  = R₀*I₀/(Φ₀/2π)
 Z0  = 50.0
 f_probe = 5.0e9
 Ω_probe = 2π*f_probe/ωc
 
 # Both ports must have their source amplitude set to zero. The port current source defaults
 # to an amplitude of 1, so an unset second port silently drives the circuit.
-make_ps(βL) = Dict{Num,Float64}(
-    jls.P1.source.ω => Ω_probe, jls.P1.source.I => 0.0,
-    jls.P2.source.ω => Ω_probe, jls.P2.source.I => 0.0,
-    jls.P1.Rₙ.r     => 50.0/R₀,
-    jls.P2.Rₙ.r     => 50.0/R₀,
-    jls.J1.r        => 1.0e6/R₀,
-    jls.J1.βc       => 1.0e-15*R₀*ωc,     # negligible junction capacitance, the model needs βc > 0
-    jls.J1.α        => 1.0,
-    jls.L1.βL       => 0.5*βL,
-    jls.L2.βL       => 0.5*βL,
+make_ps(βL) = Dict(
+    rf_squid.P1.source.ω => Ω_probe, rf_squid.P1.source.I => 0.0,
+    rf_squid.P2.source.ω => Ω_probe, rf_squid.P2.source.I => 0.0,
+    rf_squid.P1.Rₙ.r     => 50.0/R₀,
+    rf_squid.P2.Rₙ.r     => 50.0/R₀,
+    rf_squid.J1.r        => 1.0e6/R₀,
+    rf_squid.J1.βc       => 1.0e-15*R₀*ωc,     # negligible junction capacitance, the model needs βc > 0
+    rf_squid.L1.βL       => 0.5*βL,
+    rf_squid.L2.βL       => 0.5*βL,
 )
 
-@time sys = jls.HarmonicSystem(model, jls.P1.source.ω, 1, determine_jacobian = true)
+sys = HarmonicSystem(rf_squid, rf_squid.P1.source.ω, 1, determine_jacobian = true)
 
 βL_vals = 0.6:0.1:1.0
 f_vals  = collect(0.0:0.005:1.0)
@@ -57,21 +54,21 @@ S21_dB  = zeros(length(f_vals), length(βL_vals))
 for (jβ, βL) in enumerate(βL_vals)
     ps = make_ps(βL)
     # one flux sweep per βL: every working point in a single call, continued from the last
-    prob = jls.HarmonicProblem(sys, ps, parameter_sweep = [jls.Φₑ2.Φₑ => 2π .* (f_vals .+ 0.5)])
-    jls.solve!(prob)
+    prob = HarmonicProblem(sys, ps, parameter_sweep = [rf_squid.Φₑ2.Φₑ => 2π .* (f_vals .+ 0.5)])
+    solve!(prob)
 
     # the probe enters linearly, so one injection vector serves every flux point and the
     # amplitude cancels in the ratio of the transmitted wave to the incident one
-    δU = jls.perturbation_response(sys, jls.P1.source.I, merge(ps, Dict(jls.Φₑ2.Φₑ => 2π*0.5)), amplitude = 1.0)
+    δU = perturbation_response(sys, rf_squid.P1.source.I, merge(ps, Dict(rf_squid.Φₑ2.Φₑ => 2π*0.5)), amplitude = 1.0)
 
     for (jf, f_ext) in enumerate(f_vals)
-        ps_f = merge(ps, Dict(jls.Φₑ2.Φₑ => 2π*(f_ext + 0.5)))
-        lin = jls.LinearisedProblem(sys, ps_f, δU, [Ω_probe], U₀ = real.(prob.result.solution[:, jf]))
-        jls.solve!(lin)
+        ps_f = merge(ps, Dict(rf_squid.Φₑ2.Φₑ => 2π*(f_ext)))
+        lin = LinearisedProblem(sys, ps_f, δU, [Ω_probe], U₀ = real.(prob.result.solution[:, jf]))
+        solve!(lin)
 
-        V₁ = jls.get_solution(lin, jls.P1.dφ, 1)[1] * R₀ * I₀
-        I₁ = jls.get_solution(lin, jls.P1.i,  1)[1] * I₀
-        V₂ = jls.get_solution(lin, jls.P2.dφ, 1)[1] * R₀ * I₀
+        V₁ = get_solution(lin, rf_squid.P1.dφ, 1)[1] * R₀ * I₀
+        I₁ = get_solution(lin, rf_squid.P1.i,  1)[1] * I₀
+        V₂ = get_solution(lin, rf_squid.P2.dφ, 1)[1] * R₀ * I₀
         a₁ = 0.5*(V₁ + Z0*I₁)/sqrt(Z0)
         S21_dB[jf, jβ] = 20*log10(abs(V₂/sqrt(Z0)) / abs(a₁))
     end
@@ -81,21 +78,12 @@ for (jβ, βL) in enumerate(βL_vals)
 end
 
 # ---- figure, framed exactly like the paper's figure 8b ---------------------------------
-p = jls.plot(xlabel = "Norm_Ext_Flux", ylabel = "dB(S(2,1))",
+p = plot(xlabel = "Norm_Ext_Flux", ylabel = "dB(S(2,1))",
              title = "rf-SQUID coupler, 5 GHz probe",
              xlim = (0.0, 1.0), xticks = 0.0:0.1:1.0,
              ylim = (-80, 0), yticks = -80:20:0, legend = :topright)
 for (jβ, βL) in enumerate(βL_vals)
-    jls.plot!(p, f_vals, S21_dB[:, jβ], lw = 2, label = "βL = $(βL)")
+    plot!(p, f_vals, S21_dB[:, jβ], lw = 2, label = "βL = $(βL)")
 end
-mit_csv = joinpath(pkgdir(jls), "mit_rf_squid_coupler.csv")
-if isfile(mit_csv)
-    mit = readdlm(mit_csv, ',')
-    Δ = S21_dB .- Float64.(mit[:, 2:end])
-    println("vs JosephsonCircuits.jl: max|Δ| = ", round(maximum(abs.(Δ)), digits = 2),
-            " dB, median |Δ| = ", round(sort(abs.(vec(Δ)))[end÷2+1], sigdigits = 3), " dB")
-else
-    @warn "reference not found at $mit_csv: generate it with mit_rf_squid_coupler.jl"
-end
+
 display(p)
-jls.savefig(p, joinpath(pkgdir(jls), "docs", "images", "rf-squid-coupler.png"))
