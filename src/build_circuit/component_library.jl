@@ -54,7 +54,7 @@ end
         i(t)
     end
     @equations begin
-        in.Φ ~  βL*i
+        out.Φ ~  βL*i
         i ~ in.iₘ - out.iₘ 
         0 ~ in.Φ + out.Φ #Flux flowing from left loop is equal to flux entering the right loop
     end
