@@ -17,4 +17,8 @@ include("harmonic balance/get_phasor.jl")
 include("harmonic balance/colocation.jl")
 include("linearisation/linear_system.jl")
 
+export build_circuit, process_netlist, tsolve, HarmonicSystem,
+    HarmonicProblem, get_HB_scattering_matrix, get_solution, perturbation_response,
+    LinearisedProblem, solve!, Φ₀
+
 end # module JosephsonLoops

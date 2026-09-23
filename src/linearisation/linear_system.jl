@@ -56,6 +56,13 @@ function solve!(linear_problem::LinearisedProblem; kwargs...)
         working_point = Dict([var=>sol[var] for var in unknowns(linear_problem.harmonic_system.system)])
         numeric_substitution = merge(linear_problem.parameters, working_point)
 
+        mtk_parameters = ModelingToolkit.parameters(linear_problem.harmonic_system.system)
+        for global_parameter in mtk_parameters
+            if !var_is_in([p for p in keys(linear_problem.parameters)], global_parameter)
+                numeric_substitution = merge(numeric_substitution, Dict([global_parameter => ModelingToolkit.getdefault(global_parameter)]))
+            end
+        end
+
         J₀ = Float64.(Symbolics.value.(substitute(J₀, numeric_substitution)))
         J₁ = Float64.(Symbolics.value.(substitute(J₁, numeric_substitution)))
         J₂ = Float64.(Symbolics.value.(substitute(J₂, numeric_substitution)))
@@ -72,6 +79,7 @@ function solve!(linear_problem::LinearisedProblem; kwargs...)
         end
     else
         #parameter sweep
+        error("Multi dimensional parameter sweeps not yet supported in LinearisedProblem")
 
     end
     return result
