@@ -54,7 +54,7 @@ S21_dB  = zeros(length(f_vals), length(βL_vals))
 for (jβ, βL) in enumerate(βL_vals)
     ps = make_ps(βL)
     # one flux sweep per βL: every working point in a single call, continued from the last
-    prob = HarmonicProblem(sys, ps, parameter_sweep = [rf_squid.Φₑ2.Φₑ => 2π .* (f_vals .+ 0.5)])
+    prob = HarmonicProblem(sys, ps, parameter_sweep = [rf_squid.Φₑ2.Φₑ => 2π .* (f_vals)])
     solve!(prob)
 
     # the probe enters linearly, so one injection vector serves every flux point and the
