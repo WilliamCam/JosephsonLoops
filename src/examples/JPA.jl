@@ -14,10 +14,7 @@
 #
 # The two pump case adds a working point ramp, because a strongly driven circuit has more
 # than one steady state and a cold solve can land on the trivial one.
-#
-# Runtime: part 1 takes about a minute. Part 2 builds a two tone system with mixing products
-# to third order and ramps its working point, which together take about three quarters of an
-# hour; it is not hung.
+
 
 using JosephsonLoops
 using ModelingToolkit
@@ -97,6 +94,11 @@ j_pump = argmin(abs.(f_vec .- 4.75001))
 I_hb = abs(get_solution(prob1, jpa.P1.i, 1)[j_pump]) * I₀
 println("port current at the pump: harmonic balance ", round(I_hb*1e9, digits = 3), " nA, time domain ",
         round(I_td*1e9, digits = 3), " nA, difference ", round(100*abs(I_td - I_hb)/I_hb, digits = 2), " percent")
+
+p_td = plot(tsol.t ./ ωc .* 1e9, tsol[jpa.P1.i] .* I₀ .* 1e9, label = false,
+            xlabel = "t (ns)", ylabel = "port current (nA)", title = "Time domain, pump at 4.75 GHz")
+savefig(p_td, joinpath(pkgdir(JosephsonLoops), "docs", "images", "jpa-time-domain.png"))
+display(p_td)
 
 # ===================================================================================
 # part 2: two pumps at 4.65001 GHz and 4.85001 GHz through the same port

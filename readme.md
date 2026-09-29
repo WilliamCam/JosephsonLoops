@@ -539,6 +539,11 @@ The amplitude of the port current in the last periods of the transient is 9.394 
 the harmonic balance fundamental of 9.434 nA, a difference of 0.42 percent. This is the
 package checking itself: the two solvers share a model and nothing else.
 
+![JPA time domain](docs/images/jpa-time-domain.png)
+
+The port current rings up from rest over about 150 pump periods and settles at the amplitude
+harmonic balance predicts. The transient itself is something harmonic balance cannot show.
+
 The second part drives the same amplifier with two pumps at 4.65001 GHz and 4.85001 GHz.
 Both pumps enter through the single port using the current source second tone. This is the
 doubly pumped amplifier from the JosephsonCircuits.jl documentation, where it is also
@@ -660,6 +665,11 @@ be chosen through `HarmonicProblem` or `LinearisedProblem`.
 `HarmonicSystem` warns that the harmonic system is overdetermined by one equation and drops
 the last one. The redundancy is real, because the DC coefficients carry a gauge freedom, but
 which equation is dropped depends on the variable order.
+
+`get_solution` with order `0` raises a `MethodError` (`Num(::Complex{Int64})` is ambiguous),
+because the DC slot has no trigonometric factor to take a coefficient of. The DC component
+of a state is available directly from the solution array through the `DC` variables of its
+Fourier basis; a fix in `expression_for_var` is pending.
 
 `get_HB_scattering_matrix` is correct for a one port network. Its loop over ports is written
 `for k in N_ports`, which iterates once over the integer rather than over the ports, so the
