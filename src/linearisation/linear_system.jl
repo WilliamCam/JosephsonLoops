@@ -261,10 +261,13 @@ function apply_harmonic_expression!(output::AbstractArray, lin_prob::LinearisedP
     ω1, _ = h_sys.ω
 
     _, states, _, _ = get_full_equations(h_sys.time_domain_system)
+    system_unknowns = unknowns(h_sys.system)
     input_syms = Num[]
     for state in states
         basis = h_sys.variable_map[state]
-        push!(input_syms, basis.dc_coeff)
+        if any(var -> isequal(var, Symbolics.unwrap(basis.dc_coeff)), system_unknowns)
+            push!(input_syms, basis.dc_coeff)
+        end
         for n in 1:length(basis.fourier_indicies)-1
             push!(input_syms, basis.cos_coeffs[n], basis.sin_coeffs[n])
         end
@@ -313,7 +316,7 @@ the time domain system.
 """
 function perturbation_response(h_sys::HarmonicSystem, source_param::Num, parameters::Dict; amplitude::Float64 = 1.0)
     t = Num(ModelingToolkit.get_iv(h_sys.time_domain_system))
-    eqs, _, _, _ = get_full_equations(h_sys.time_domain_system)
+    eqs, states, _, _ = get_full_equations(h_sys.time_domain_system)
     ω1, ω2 = h_sys.ω
     fourier_indicies = h_sys.variable_map[unknowns(h_sys.time_domain_system)[1]].fourier_indicies
     Nt = 2*length(fourier_indicies)-1
@@ -355,7 +358,15 @@ function perturbation_response(h_sys::HarmonicSystem, source_param::Num, paramet
             U[base + 2n - 2] -= amplitude * (Q + im * I)
         end
     end
-    return U
+    system_unknowns = unknowns(h_sys.system)
+    keep_rows = trues(length(U))
+    for (k, state) in enumerate(states)
+        dc_coeff = Symbolics.unwrap(h_sys.variable_map[state].dc_coeff)
+        if !any(var -> isequal(var, dc_coeff), system_unknowns)
+            keep_rows[(k - 1) * Nt + 1] = false
+        end
+    end
+    return U[keep_rows]
 end
 
 # NOTE: a second apply_harmonic_expression! used to sit here, dispatching on LinearProblem,

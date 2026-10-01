@@ -220,18 +220,29 @@ function harmonic_equation(eqs::Vector{Equation}, states::Vector{Num}, tvar::Num
                     sample_collocation_grid!(d_residuals, Nt, d_res_expr, ω_grid, tvar)
         end
     end
-    if single_tone
-        @named sys = NonlinearSystem(residuals)
-    else
-        projected = torus ? rotate_to_harmonic_frame(M, indices_ac, Nt1, Nt2, residuals) :
-                            rotate_to_harmonic_frame(M, n_ints, Nt, residuals)
-        @named sys = NonlinearSystem([expr ~ 0 for expr in projected])
+    projected = single_tone ? rotate_to_harmonic_frame(M, N, Nt, residuals) :
+                torus ? rotate_to_harmonic_frame(M, indices_ac, Nt1, Nt2, residuals) :
+                        rotate_to_harmonic_frame(M, n_ints, Nt, residuals)
+    drop_rows = Int[]
+    block_rows = 2 * N_terms - 1
+    projected_vars = reduce(vcat, (Symbolics.get_variables(expr) for expr in projected))
+    for k in 1:M
+        dc_coeff = Symbolics.unwrap(basis_map[states[k]].dc_coeff)
+        if !any(var -> isequal(var, dc_coeff), projected_vars)
+            push!(drop_rows, (k - 1) * block_rows + 1)
+        end
     end
+    keep_rows = setdiff(eachindex(projected), drop_rows)
+    @named sys = NonlinearSystem([expr ~ 0 for expr in projected[keep_rows]])
     if jac
         rotated_system = single_tone ? rotate_to_harmonic_frame(M, N, Nt, d_residuals) :
                          torus       ? rotate_to_harmonic_frame(M, indices_ac, Nt1, Nt2, d_residuals) :
                                        rotate_to_harmonic_frame(M, n_ints, Nt, d_residuals)
+        rotated_system = rotated_system[keep_rows]
         J0, J1, J2 = build_jacobians(rotated_system, vars, dvars, d2vars)
+        keep_cols = trues(length(vars))
+        keep_cols[drop_rows] .= false
+        J0, J1, J2 = J0[:, keep_cols], J1[:, keep_cols], J2[:, keep_cols]
         return sys, X, basis_map, (J0, J1, J2)
     else
         return sys, X, basis_map, nothing
