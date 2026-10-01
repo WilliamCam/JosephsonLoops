@@ -20,9 +20,10 @@ function sample_collocation_grid_2D!(residuals, Nt1, Nt2, res_expr, θ1, θ2)
     end
 end
 
-function harmonic_solution(fourier_basis::FourierBasis, ω1::Num, ω2::Num, t::Num)
+function harmonic_solution(fourier_basis::FourierBasis, ω1::Num, ω2::Num, t::Num;
+        drift::Int=0)
     indices = fourier_basis.fourier_indicies
-    X = fourier_basis.dc_coeff
+    X = fourier_basis.dc_coeff + drift * ω1 * t
     cos_coeff, sin_coeff = fourier_basis.sin_coeffs, fourier_basis.cos_coeffs
     for n in 2:length(indices)
         pump_index, signal_index = indices[n]
@@ -32,7 +33,8 @@ function harmonic_solution(fourier_basis::FourierBasis, ω1::Num, ω2::Num, t::N
     return X
 end
 
-function harmonic_solution_symbolic_derrivative(fourier_basis::FourierBasis, ω1::Num, ω2::Num, tvar::Num)
+function harmonic_solution_symbolic_derrivative(fourier_basis::FourierBasis, ω1::Num, ω2::Num,
+        tvar::Num; drift::Int=0)
     indices = fourier_basis.fourier_indicies
     N = length(indices)-1
     # must mirror harmonic_solution's quadrature convention (sin_coeffs on cos,
@@ -63,7 +65,7 @@ function harmonic_solution_symbolic_derrivative(fourier_basis::FourierBasis, ω1
     )
     #Retrieves symbolic expressions and collects all Num's for determiniation of jacobian
     X = dc_of_t # Start with the DC term A₁
-    dX = d_dc_of_t
+    dX = d_dc_of_t + drift * ω1
     d2X = d2_dc_of_t
     for n in 1:N
         pump_index, signal_index = indices[n+1] # ignore DC index
@@ -97,12 +99,17 @@ function harmonic_solution_symbolic_derrivative(fourier_basis::FourierBasis, ω1
 end
 
 function harmonic_equation(eqs::Vector{Equation}, states::Vector{Num}, tvar::Num, ω::Union{Tuple{Num,Num}}, N::Int;
-        jac=false, intermod_order = 0, commensurate = nothing, oversample::Int = 1)
+        jac=false, intermod_order = 0, commensurate = nothing, oversample::Int = 1,
+        drifting_states::Dict{Num,Int}=Dict{Num,Int}())
     M = length(states)
     @assert (M == length(eqs)) "System does not have the same number of equations as state variables"
     @assert length(ω) <= 2 "maximum of two tones supported"
 
     ω1, ω2 = ω
+    for state in keys(drifting_states)
+        any(s -> isequal(s, state), states) ||
+            throw(ArgumentError("drifting state $state is not a state in this system"))
+    end
     # isequal, not ==: Num == Num is symbolic when ω2 is a real frequency symbol
     single_tone = isequal(ω2, Num(0))
 
@@ -167,12 +174,14 @@ function harmonic_equation(eqs::Vector{Equation}, states::Vector{Num}, tvar::Num
         cur_fourier_basis = basis_map[cur_state]
 
         #ansatz
-        harmonic_state = harmonic_solution(cur_fourier_basis, ω1, ω2, tvar)
+        drift = get(drifting_states, cur_state, 0)
+        harmonic_state = harmonic_solution(cur_fourier_basis, ω1, ω2, tvar; drift)
         push!(X, harmonic_state)
 
         #derivatives
         if jac
-            dX, d2X = harmonic_solution_symbolic_derrivative(cur_fourier_basis, ω1, ω2, tvar)
+            dX, d2X = harmonic_solution_symbolic_derrivative(cur_fourier_basis, ω1, ω2, tvar;
+                drift)
             jac_subs[Differential(tvar)(Differential(tvar)(states[k]))] = d2X
             jac_subs[Differential(tvar)(states[k])]                     = dX
             jac_subs[states[k]]                                         = harmonic_state

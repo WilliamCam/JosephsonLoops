@@ -103,7 +103,9 @@ function solve!(linear_problem::LinearisedProblem; kwargs...)
         U_small_signal = SVector{K}(δU)
         # linearised around the single declared pump (tone 1): δ = Ω − ω1; the δ²J₂ term
         # makes the response exact in δ for the truncated basis
-        Ωp_value = linear_problem.parameters[Ωp[1]]
+        Ωp_value = isnothing(linear_problem.harmonic_system.autonomous_frequency) ?
+            linear_problem.parameters[Ωp[1]] :
+            working_point[linear_problem.harmonic_system.autonomous_frequency]
         #TODO: optional argument to only compute taylor expansion to second order (for speed)
         for (column_index, Ω) in enumerate(Ωs)
             δ = Ω - Ωp_value

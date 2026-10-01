@@ -1,9 +1,3 @@
-using Symbolics
-using SymbolicUtils
-using NonlinearSolve
-using BenchmarkTools
-using StaticArrays
-
 struct FourierBasis
     dc_coeff::Num
     d_dc_coeff::Num
@@ -32,6 +26,7 @@ struct HarmonicSystem
     harmonic_ansatz::Vector{Num}
     variable_map::Dict{Num, FourierBasis}
     jacobian::Union{Tuple{Matrix{Num}, Matrix{Num}}, Tuple{Matrix{Num}, Matrix{Num}, Matrix{Num}}, Nothing}
+    autonomous_frequency::Union{Num,Nothing}
 end
 
 struct HarmonicResult
@@ -57,6 +52,7 @@ function _show_harmonic_system(io::IO, sys::HarmonicSystem)
     print(io, "  equations: ", length(equations(sys.system)), "\n")
     jacobian_order = isnothing(sys.jacobian) ? "not computed" : "Yes"
     print(io, "  jacobians: ", jacobian_order, "\n")
+    print(io, "  autonomous frequency: ", isnothing(sys.autonomous_frequency) ? "no" : "yes", "\n")
 end
 
 function _show_fourier_basis(io::IO, basis::FourierBasis)
@@ -122,7 +118,6 @@ function Base.show(io::IO, problem::HarmonicProblem)
     print(io, "HarmonicProblem(parameters=", length(problem.parameters),
         ", result_size=", size(problem.result.solution), ")")
 end
-
 
 """
     solve!(harmonic_problem::HarmonicProblem; continuation=true)
@@ -284,6 +279,14 @@ result is an algebraic system in the Fourier coefficients.
 - `max_denominator::Int = 1000`: largest integers allowed in that ratio.
 - `oversample::Int = 2`: extra collocation points beyond the minimum, which keeps aliased
   content off the occupied basis slots.
+- `autonomous::Bool = false`: solve for an unknown fundamental frequency. The default
+  Fourier ansatz is periodic in every state. For states with a secular phase ramp, list each
+  state and its integer winding in `drifting_states`; its ansatz becomes
+  `winding*ω₀*t + periodic_part`. This is useful for running Josephson phases, whose phase
+  advances by one or more fundamental cycles per period.
+- `drifting_states::Dict{Num,Int}`: state variables with a known integer winding relative to
+  the autonomous fundamental. Use `1` or `-1` for opposite-running phases. This option
+  requires `autonomous=true` and a single-tone system.
 
 # Returns
 - `HarmonicSystem`: pass to [`HarmonicProblem`](@ref) or [`LinearisedProblem`](@ref).
@@ -300,12 +303,17 @@ sys = HarmonicSystem(model, (P1.source.ω, P1.source.ω₂), 2,
 """
 function HarmonicSystem(sys, ω::Union{Num,Tuple{Num,Num}}, N::Int; tearing::Bool=true, determine_jacobian::Bool=false,
         intermod_order::Int=0, tones::Union{Nothing,Tuple{<:Real,<:Real}}=nothing,
-        commensurate_tol::Real=1e-6, max_denominator::Int=1000, oversample::Int=2)
+        commensurate_tol::Real=1e-6, max_denominator::Int=1000, oversample::Int=2,
+        autonomous::Bool=false, drifting_states::Dict{Num,Int}=Dict{Num,Int}())
     # `typeof(ω) !== Tuple` was always true (Tuple{Num,Num} !== the UnionAll Tuple),
     # double-wrapping real two-tone inputs.
     if !(ω isa Tuple)
         ω = (ω, Num(0))
     end
+    !autonomous && !isempty(drifting_states) &&
+        throw(ArgumentError("drifting_states can only be used with autonomous=true"))
+    autonomous && !isequal(ω[2], Num(0)) &&
+        throw(ArgumentError("autonomous harmonic balance currently supports one tone"))
 
     # Two-tone grid selection, all in the backend (no integers in the API):
     #  * `tones` given (the pump frequencies as plain numbers, any consistent units —
@@ -336,12 +344,9 @@ function HarmonicSystem(sys, ω::Union{Num,Tuple{Num,Num}}, N::Int; tearing::Boo
     tvar = Num(ModelingToolkit.get_iv(sys))
     eqs, states, _, _ = get_full_equations(sys)
 
-    # harmonic_equation takes vectors. A single state system used to be unwrapped to
-    # scalars here, which no method ever accepted, so a one degree of freedom system such
-    # as a Duffing oscillator raised a MethodError.
     nonlinear_sys, X, variable_map, jac = harmonic_equation(eqs, Num.(states), tvar, ω, N;
         jac=determine_jacobian, intermod_order=intermod_order, commensurate=commensurate,
-        oversample=oversample)
+        oversample=oversample, drifting_states=drifting_states)
     
     sys_eqs, sys_vars = equations(nonlinear_sys), unknowns(nonlinear_sys)
     
@@ -350,13 +355,23 @@ function HarmonicSystem(sys, ω::Union{Num,Tuple{Num,Num}}, N::Int; tearing::Boo
         n_drop = length(sys_eqs) - length(sys_vars)
         @warn "Harmonic system is overdetermined: $(length(sys_eqs)) equations for $(length(sys_vars)) variables. " *
               "Dropping the last equation(s). Caution: This behavior depends on variable order."
-        sys_eqs = sys_eqs[1:end-n_drop]
+        sys_eqs = sys_eqs[2:end]
+    end
+
+    autonomous_frequency = nothing
+    if autonomous
+        @variables ω₀
+        autonomous_frequency = ω₀
+        sys_eqs = Symbolics.substitute(sys_eqs, Dict(ω[1]=>ω₀))
+        !isnothing(jac) && (jac = map(J -> Symbolics.substitute(J, Dict(ω[1]=>ω₀)), jac))
+        var = variable_map[states[1]].cos_coeffs[1]
+        push!(sys_eqs, 0 ~ var)
+        push!(sys_vars, Symbolics.unwrap(ω₀))
     end
         
     built_equations = tearing ? sys_eqs : [0 ~ eq.lhs - eq.rhs for eq in sys_eqs]
-
     @named nonlinear_sys = NonlinearSystem(built_equations, sys_vars, parameters(sys))
     complete_sys = tearing ? mtkcompile(nonlinear_sys) : complete(nonlinear_sys)
 
-    return HarmonicSystem(complete_sys, sys, ω, N, X, variable_map, jac)
+    return HarmonicSystem(complete_sys, sys, ω, N, X, variable_map, jac, autonomous_frequency)
 end

@@ -4,6 +4,9 @@ module JosephsonLoops
 using ModelingToolkit, Plots, DifferentialEquations, Symbolics, DataStructures, LinearAlgebra, NonlinearSolve
 using Symbolics
 using SymbolicUtils
+using NonlinearSolve
+using BenchmarkTools
+using StaticArrays
 
 
 #Internal API
