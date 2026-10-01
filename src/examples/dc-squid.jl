@@ -1,113 +1,97 @@
-using JosephsonLoops
-using ModelingToolkit
-using Plots
 
-# ---- circuit ----------------------------------------------------------------------
-loops = [
-    ["I1", "R1", "Lin"],
-    ["Lt", "J1", "J2"],
-    ["J2", "Idc"],
-    ["Idc", "R2"],
-]
+using JosephsonLoops, ModelingToolkit, Plots
+@parameters ωHB
 
-circuit = process_netlist(loops, mutual_coupling=[(1, 2)], ext_flux=[false, true, false, false])
-squid, u0, guesses = build_circuit(circuit)
+# One loop inductance, two junctions, DC bias, external flux, and voltage readout.
+loops = [["Lt", "J1", "J2"], ["J2", "Idc"], ["Idc", "R2"]]
+squid, _, guesses = build_circuit(process_netlist(loops, ext_flux=[true, false, false]))
 
-# ---- normalisation and bias ---------------------------------------------------------
-I₀ = 1e-6
-R₀ = 10.0e3
-ωc = R₀ * I₀ / (Φ₀ / 2π)
-Z0 = 50.0
-f_probe = collect(0.1:0.1:10.0) # MHz offset from the running-state carrier
-Ω_probe_offset = 2π .* f_probe .* 1e6 ./ ωc
+Φ0 = JosephsonLoops.Φ₀
+Ic, Rj, Lsq = 6.3e-6, 6.0, 200e-12
+ωc = Rj * Ic / (Φ0 / 2π)
+βC_paper = 1.0 # Assumed: the paper gives βC ≈ 1 as optimum guidance, not device Cj.
+Cj_assumed = βC_paper * Φ0 / (π * Ic * Rj^2)
 
-ps = Dict(
-    squid.I1.ω       => first(Ω_probe_offset),
-    squid.I1.I       => 0.0,
-    squid.R1.r       => Z0 / R₀,
-    squid.R2.r       => Z0 / R₀,
-    squid.Idc.I      => 2.2, # 2.2 I₀: voltage-running state for this flux and circuit
-    squid.Idc.ω      => 0.0,
-    squid.Lin.βL     => 400.0,
-    squid.J1.βc      => 1000.0e-15 * R₀ * ωc,
-    squid.J1.r       => 6.0 / R₀,
-    squid.J2.βc      => 1000.0e-15 * R₀ * ωc,
-    squid.J2.r       => 6.0 / R₀,
-    squid.Lt.βL      => 1.0,
-    squid.M12.βM     => 2.0,
-    squid.Φₑ2.Φₑ    => 0.5 * 2π,
+ps = Dict{Num,Float64}(
+    squid.Idc.I => 1.8, squid.Idc.ω => 0.0,
+    squid.Lt.βL => 2π * Lsq * Ic / Φ0, # Model uses flux units Φ0/(2π); Lt is total Lsq.
+    squid.J1.βc => 2βC_paper, squid.J2.βc => 2βC_paper,
+    squid.J1.r => 1.0, squid.J2.r => 1.0, # Rj/Rj
+    squid.R2.r => 1.0, # Assumed readout load Rload = Rj; not specified in the paper.
+    squid.Φₑ1.Φₑ => π / 2, # Φ0/4 in model units.
 )
 
-# Estimate the Josephson carrier from the late-time phase slopes. The two junction
-# phases wind in opposite directions in this netlist, but share the same fundamental.
-tspan = (0.0, 4e-9) .* ωc
-tsol = tsolve(squid, guesses, ps, tspan; guesses=guesses)
-
-function phase_slope(t, phase)
-    first_idx = cld(length(t), 2)
-    t_fit = t[first_idx:end]
-    phase_fit = phase[first_idx:end]
-    t_mean = sum(t_fit) / length(t_fit)
-    phase_mean = sum(phase_fit) / length(phase_fit)
-    sum((t_fit .- t_mean) .* (phase_fit .- phase_mean)) /
-        sum((t_fit .- t_mean).^2)
+# Average voltage after transients for small static flux offsets estimates the
+# quasistatic responsivity without resolving the GHz carrier as a probe.
+δφ = 1e-3
+function mean_voltage(φₑ)
+    p = merge(ps, Dict{Num,Float64}(squid.Φₑ1.Φₑ => φₑ))
+    sol = tsolve(squid, guesses, p, (0.0, 10e-9) .* ωc; guesses)
+    first_fit = cld(length(sol.t), 2)
+    v = p[squid.R2.r] .* sol[squid.R2.i] .* (Rj * Ic)
+    return sum(v[first_fit:end]) / length(v[first_fit:end])
 end
 
-ωJ1_td = phase_slope(tsol.t, tsol[squid.J1.φ])
-ωJ2_td = phase_slope(tsol.t, tsol[squid.J2.φ])
-ω0_guess = (abs(ωJ1_td) + abs(ωJ2_td)) / 2
-println("Time-domain phase-rate estimates: ",
-        round(ωJ1_td * ωc / (2π) / 1e9, digits=4), " and ",
-        round(ωJ2_td * ωc / (2π) / 1e9, digits=4), " GHz")
+V₋, V₊ = mean_voltage(π / 2 - δφ), mean_voltage(π / 2 + δφ)
+model_μV_per_Φ0 = abs(V₊ - V₋) / (2δφ) * 2π * 1e6
+theory_μV_per_Φ0 = Rj / Lsq * Φ0 * 1e6
+βL_paper = Lsq * Ic / Φ0
 
-# ---- autonomous HB of the voltage-running state ------------------------------------
-# Each selected phase is represented as winding*ω₀*t plus a periodic Fourier correction.
-# The sign records the direction of phase advance in the circuit's branch convention.
-sys = HarmonicSystem(
-    squid, squid.I1.ω, 2;
+println("Reported device parameters: Ic = $(Ic*1e6) μA, Rj = $Rj Ω, Lsq = $(Lsq*1e12) pH")
+println("Derived βL = ", round(βL_paper, digits=3),
+        " (paper's optimized guidance is ≈1; this reported device is not exactly at optimum)")
+println("Flux bias Φ0/4, current bias 1.8Ic; assumed βC = ", βC_paper)
+println("Inferred Cj from assumed βC: ", round(Cj_assumed * 1e12, sigdigits=3), " pF")
+println("Modeled low-frequency dV/dΦ: ", round(model_μV_per_Φ0, sigdigits=4), " μV/Φ0")
+println("Ankel et al. Eq. (2), Rj/Lsq: ", round(theory_μV_per_Φ0, sigdigits=4), " μV/Φ0")
+println("Theory comparison is approximate; bias is idealized and Cj/readout load are assumed.")
+
+p_static = bar(["Time-domain model", "Rj/Lsq estimate"],
+    [model_μV_per_Φ0, theory_μV_per_Φ0],
+    ylabel="Flux-to-voltage responsivity (μV/Φ₀)",
+    title="Quasistatic response near Φ₀/4", legend=false)
+
+# Linearise about the running state and sweep upper sidebands from the carrier
+# through 1 GHz offset. This is flux-to-voltage responsivity in V/Φ₀, not power gain.
+tspan = (0.0, 10e-9) .* ωc
+tsol = tsolve(squid, guesses, ps, tspan; guesses)
+function late_phase_rate(t, φ)
+    i = cld(length(t), 2)
+    x, y = t[i:end], φ[i:end]
+    xc, yc = x .- sum(x) / length(x), y .- sum(y) / length(y)
+    sum(xc .* yc) / sum(abs2, xc)
+end
+ω0_guess = (abs(late_phase_rate(tsol.t, tsol[squid.J1.φ])) +
+            abs(late_phase_rate(tsol.t, tsol[squid.J2.φ]))) / 2
+
+sys = HarmonicSystem(squid, ωHB, 2;
     autonomous=true,
     drifting_states=Dict(squid.J1.φ => 1, squid.J2.φ => -1),
-    determine_jacobian=true,
-)
+    determine_jacobian=true)
 prob = HarmonicProblem(sys, ps)
-ω0_index = JosephsonLoops.var_index(unknowns(sys.system), sys.autonomous_frequency)
-prob.U₀[ω0_index] = ω0_guess
-sol = JosephsonLoops.solve!(prob)
+iω0 = JosephsonLoops.var_index(unknowns(sys.system), sys.autonomous_frequency)
+prob.U₀[iω0] = ω0_guess
+U = real.(JosephsonLoops.solve!(prob))
+ω0 = U[iω0]
+residual = maximum(abs.(prob.problem.f(U, prob.problem.p)))
+@assert residual < 1e-8 "Autonomous HB did not converge"
 
-U_wp = real.(sol)
-ω0 = U_wp[ω0_index]
-hb_residual = prob.problem.f(U_wp, prob.problem.p)
-max_hb_residual = maximum(abs.(hb_residual))
-f0 = ω0 * ωc / (2π)
-println("Autonomous HB carrier: ", round(f0 / 1e9, digits=4), " GHz")
-println("Maximum autonomous-HB residual: ", max_hb_residual)
-@assert ω0 > 0 "Autonomous HB returned a non-positive carrier frequency"
-@assert max_hb_residual < 1e-8 "Autonomous HB did not converge to a consistent solution"
-
-# ---- MHz small-signal response about the running state ------------------------------
-# LinearisedProblem takes absolute probe frequencies. Shift the probe offsets by the
-# solved carrier, and set the reference tone to that same carrier.
-ps_run = merge(ps, Dict(squid.I1.ω => ω0))
-δU = perturbation_response(sys, squid.I1.I, ps_run, amplitude=1.0)
-Ω_probe = ω0 .+ Ω_probe_offset
-lin = LinearisedProblem(sys, ps_run, δU, Ω_probe, U₀=U_wp)
+δU = perturbation_response(sys, squid.Φₑ1.Φₑ, ps, amplitude=1.0)
+f_gain = collect(range(0.0, 1.0e9, length=101))
+Ω_gain = ω0 .+ 2π .* f_gain ./ ωc
+lin = LinearisedProblem(sys, ps, δU, Ω_gain; U₀=U)
 JosephsonLoops.solve!(lin)
+V_per_Φ0 = 2π * Rj * Ic .* get_solution(lin, squid.R2.r * squid.R2.i, 1)
+@assert all(isfinite, real.(V_per_Φ0)) && all(isfinite, imag.(V_per_Φ0)) "Non-finite flux response"
 
-# The resistor relation D(φ) = r*i gives its voltage in the model's normalised units.
-vout = get_solution(lin, squid.R2.r * squid.R2.i, 1)
-Ztrans = R₀ .* vout
-Ztrans_dBΩ = 20 .* log10.(abs.(Ztrans))
+println("Autonomous carrier: ", round(ω0 * ωc / 2π / 1e9, digits=3), " GHz")
+println("HB maximum residual: ", residual)
+println("Flux-to-voltage response at DC: ", round(abs(V_per_Φ0[1]) * 1e6, sigdigits=4), " μV/Φ₀")
+println("Flux-to-voltage response at 1 GHz offset: ",
+        round(abs(V_per_Φ0[end]) * 1e6, sigdigits=4), " μV/Φ₀")
 
-println("MHz probe sweep: transimpedance magnitude ",
-        round(minimum(abs.(Ztrans)), sigdigits=4), " to ",
-        round(maximum(abs.(Ztrans)), sigdigits=4), " Ω")
-println("Response finite across sweep: ", all(isfinite, real.(Ztrans)) &&
-        all(isfinite, imag.(Ztrans)))
-@assert all(isfinite, real.(Ztrans)) && all(isfinite, imag.(Ztrans)) "Non-finite small-signal response"
-
-p1 = plot(f_probe, Ztrans_dBΩ, lw=2, label=false,
-          xlabel="Probe offset from carrier (MHz)", ylabel="|Vout / Iin| (dBΩ)",
-          title="Running DC-SQUID small-signal transimpedance")
-p2 = plot(f_probe, angle.(Ztrans) .* 180 / π, lw=2, label=false,
-          xlabel="Probe offset from carrier (MHz)", ylabel="Phase (degrees)")
-display(plot(p1, p2, layout=(2, 1), size=(760, 650)))
+p_gain = plot(f_gain ./ 1e9, 20 .* log10.(abs.(V_per_Φ0 ./ 1e-6)), lw=2,
+    xlabel="Upper-sideband offset from carrier (GHz)",
+    ylabel="Flux-to-voltage response (dB re 1 μV/Φ₀)",
+    title="DC-SQUID small-signal response, 0–1 GHz offset", label=false)
+display(plot(p_static, p_gain, layout=(2, 1), size=(800, 700)))
