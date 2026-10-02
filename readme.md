@@ -518,41 +518,19 @@ the numbers quoted here, and the amplifier example regenerates its own figure.
 ### Josephson parametric amplifier
 
 A single junction parametric amplifier. The circuit is a 50 ohm port, a 100 fF coupling
-capacitor, and a 1000 pH junction shunted by 1000 fF, all in one loop. This is the amplifier
-from the JosephsonCircuits.jl documentation, so its answers can be checked against that
-package directly.
+capacitor, and a 1000 pH junction shunted by 1000 fF, all in one loop. 
 
 ![JPA gain](docs/images/jpa.png)
 
 The example drives it twice. With one pump at 4.75001 GHz and 11.3 nA, the gain peak is
-13.119 dB at 4.750 GHz with a 3 dB bandwidth of 12.0 MHz. JosephsonCircuits.jl gives
-13.301 dB at the same frequency and the same 12 MHz bandwidth, and raising the basis to
-`N = 3` moves the peak to 13.295 dB.
-
-One convention matters when comparing drive amplitudes. The `current` argument in
-JosephsonCircuits.jl is a one sided spectral amplitude, which is half the peak amplitude of
-an `I*sin(ωt)` source. The reference's 5.65 nA is 11.3 nA here.
+13.119 dB at 4.750 GHz with a 3 dB bandwidth of 12.0 MHz. 
 
 The same working point is then integrated in the time domain from rest at the pump frequency.
 The amplitude of the port current in the last periods of the transient is 9.394 nA against
 the harmonic balance fundamental of 9.434 nA, a difference of 0.42 percent. This is the
 package checking itself: the two solvers share a model and nothing else.
 
-The second part drives the same amplifier with two pumps at 4.65001 GHz and 4.85001 GHz.
-Both pumps enter through the single port using the current source second tone. This is the
-doubly pumped amplifier from the JosephsonCircuits.jl documentation, where it is also
-compared with WRspice. The working point is reached by ramping both pump amplitudes
-together, and the gain peak is 10.566 dB at 4.750 GHz against 10.553 dB from
-JosephsonCircuits.jl at the same frequency.
 
-The pump ratio 4.65:4.85 reduces to 93:97, so the two tones share a base frequency near
-50 MHz and the commensurate grid applies. The second pump is shifted by 430 Hz to make the
-ratio exact, more than four orders of magnitude below the gain linewidth. The example sets
-`ω₂` to the shifted value directly so the parameter and the grid agree.
-
-The single pump part takes about a minute. The two pump system is built with mixing products
-to third order, and that build plus the working point ramp takes about three quarters of an
-hour. It is not hung.
 
 Script: `src/examples/JPA.jl`.
 
@@ -579,8 +557,7 @@ Script: `src/examples/rf-squid-coupler.jl`.
 
 ### Driven Duffing oscillator
 
-Not a circuit. The harmonic balance backend takes any ModelingToolkit system, so the same
-code path that solves a Josephson circuit solves
+Not a circuit. The harmonic balance backend takes any ModelingToolkit system
 
 ```
 ẍ + γẋ + ω₀²x + αx³ + ηẋx² = F cos(ωt)
@@ -606,31 +583,9 @@ any window that still contains the linear resonance, so it is left out.
 
 Script: `src/examples/duffing-oscillator.jl`.
 
-## Cross-checks
-
-JosephsonCircuits.jl is an established nodal harmonic balance package that solves the same
-circuits by a different formulation. It is used here as an independent fact check: when two
-solvers that share no code and no formulation agree on a strongly pumped working point, both
-are very likely right. It is not used as a performance benchmark, and no timing comparison is
-made or implied. Where a closed form exists, as for the Duffing oscillator, the closed form
-is used instead, and the package also checks itself by integrating a harmonic balance working
-point in the time domain.
-
-| Quantity | JosephsonLoops | Checked against | Difference |
-|---|---|---|---|
-| JPA gain peak, one pump | 13.119 dB at `N = 2`, 13.295 dB at `N = 3` | 13.301 dB, JosephsonCircuits.jl | 0.006 dB at `N = 3` |
-| JPA 3 dB bandwidth | 12.0 MHz | 12 MHz, JosephsonCircuits.jl | matched |
-| JPA port current at the pump | 9.434 nA, harmonic balance | 9.394 nA, this package's time domain solve | 0.42 percent |
-| JPA gain peak, two pumps | 10.566 dB | 10.553 dB, JosephsonCircuits.jl | 0.013 dB |
-| rf-SQUID coupler, `βL = 0.6` to `1.0`, whole flux sweep | see the example | JosephsonCircuits.jl, same circuit and flux grid | max 0.18 dB, median 0.0006 dB |
-| Duffing oscillator at weak drive | peak 0.00995 | 0.01, closed form | 0.52 percent |
-
-The JosephsonCircuits.jl values for the amplifier are the ones given in that package's
-documentation examples. The amplifier rows are printed by `JPA.jl` every time it runs.
-
 ## Current status
 
-This package is under active development as part of a masters thesis. The following areas are
+This package is under active development as part of a honors thesis. The following areas are
 known to be incomplete.
 
 Large junction arrays are not practical yet. The symbolic build of a harmonic system grows
@@ -665,8 +620,6 @@ which equation is dropped depends on the variable order.
 two port case leaves the first wave at zero. The coupler example computes S21 from the port
 waves directly for that reason.
 
-The ensemble sweep helpers `ensemble_fsolve` and `ensemble_parameter_sweep` call `mean`
-without importing `Statistics`, so they raise an `UndefVarError` when used.
 
 `build_circuit` prints the branch names and the full component dictionary on every call, with
 no way to silence it. The second return value, `u0`, is always an empty vector, because the
