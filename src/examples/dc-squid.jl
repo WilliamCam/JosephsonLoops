@@ -1,4 +1,4 @@
-
+ 
 using JosephsonLoops, ModelingToolkit, Plots
 @parameters ωHB
 
@@ -37,19 +37,6 @@ model_μV_per_Φ0 = abs(V₊ - V₋) / (2δφ) * 2π * 1e6
 theory_μV_per_Φ0 = Rj / Lsq * Φ0 * 1e6
 βL_paper = Lsq * Ic / Φ0
 
-println("Reported device parameters: Ic = $(Ic*1e6) μA, Rj = $Rj Ω, Lsq = $(Lsq*1e12) pH")
-println("Derived βL = ", round(βL_paper, digits=3),
-        " (paper's optimized guidance is ≈1; this reported device is not exactly at optimum)")
-println("Flux bias Φ0/4, current bias 1.8Ic; assumed βC = ", βC_paper)
-println("Inferred Cj from assumed βC: ", round(Cj_assumed * 1e12, sigdigits=3), " pF")
-println("Modeled low-frequency dV/dΦ: ", round(model_μV_per_Φ0, sigdigits=4), " μV/Φ0")
-println("Ankel et al. Eq. (2), Rj/Lsq: ", round(theory_μV_per_Φ0, sigdigits=4), " μV/Φ0")
-println("Theory comparison is approximate; bias is idealized and Cj/readout load are assumed.")
-
-p_static = bar(["Time-domain model", "Rj/Lsq estimate"],
-    [model_μV_per_Φ0, theory_μV_per_Φ0],
-    ylabel="Flux-to-voltage responsivity (μV/Φ₀)",
-    title="Quasistatic response near Φ₀/4", legend=false)
 
 # Linearise about the running state and sweep upper sidebands from the carrier
 # through 1 GHz offset. This is flux-to-voltage responsivity in V/Φ₀, not power gain.
@@ -83,12 +70,6 @@ lin = LinearisedProblem(sys, ps, δU, Ω_gain; U₀=U)
 JosephsonLoops.solve!(lin)
 V_per_Φ0 = 2π * Rj * Ic .* get_solution(lin, squid.R2.r * squid.R2.i, 1)
 @assert all(isfinite, real.(V_per_Φ0)) && all(isfinite, imag.(V_per_Φ0)) "Non-finite flux response"
-
-println("Autonomous carrier: ", round(ω0 * ωc / 2π / 1e9, digits=3), " GHz")
-println("HB maximum residual: ", residual)
-println("Flux-to-voltage response at DC: ", round(abs(V_per_Φ0[1]) * 1e6, sigdigits=4), " μV/Φ₀")
-println("Flux-to-voltage response at 1 GHz offset: ",
-        round(abs(V_per_Φ0[end]) * 1e6, sigdigits=4), " μV/Φ₀")
 
 p_gain = plot(f_gain ./ 1e9, 20 .* log10.(abs.(V_per_Φ0 ./ 1e-6)), lw=2,
     xlabel="Upper-sideband offset from carrier (GHz)",
