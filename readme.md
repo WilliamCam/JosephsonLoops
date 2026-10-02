@@ -54,8 +54,7 @@ being worked on.
 
 ## Why loop currents
 
-Most harmonic balance simulators for superconducting circuits, including
-[JosephsonCircuits.jl](https://github.com/kpobrien/JosephsonCircuits.jl), use a nodal
+Most harmonic balance simulators for superconducting circuits use a nodal
 formulation. They solve for node fluxes. JosephsonLoops.jl uses a mesh formulation instead.
 It solves for loop currents, and the circuit is entered as a list of loops rather than as a
 list of node pairs.
