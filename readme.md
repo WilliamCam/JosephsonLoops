@@ -49,7 +49,6 @@ being worked on.
   - [Josephson parametric amplifier](#josephson-parametric-amplifier)
   - [rf-SQUID coupler](#rf-squid-coupler)
   - [Driven Duffing oscillator](#driven-duffing-oscillator)
-- [Cross-checks](#cross-checks)
 - [Current status](#current-status)
 
 ## Why loop currents
