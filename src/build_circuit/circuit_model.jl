@@ -177,7 +177,7 @@ function build_circuit(circuit::CircuitNetlist; no_tearing = false)
     end
 
     for n in mutual_coupling
-        eval(Meta.parse("@named M" * string(n[1])*string(n[2]) * "= Inductor()"))
+        eval(Meta.parse("@named M" * string(n[1])*string(n[2]) * "= MutualCoupling()"))
         built_components["M" *string(n[1])*string(n[2])] = eval(Meta.parse("M" * string(n[1])*string(n[2]))) 
     end
     for (i,k) in enumerate(ext_flux)
@@ -223,6 +223,7 @@ function build_circuit(circuit::CircuitNetlist; no_tearing = false)
             push!(connectables, k_sys.in)
             push!(ground_loop_connectables, k_sys.out)
         end
+
         push!(eqs, connect(connectables...))
     end
 
@@ -274,4 +275,3 @@ end
 
 # #cirucit model ODAE system and initial condition vector are created.
 # model = build_circuit(circuit)
-

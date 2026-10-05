@@ -29,6 +29,10 @@ function var_index(vars::Vector, target_var::SymbolicUtils.BasicSymbolic{Real})
     return findfirst(x->isequal(x, target_var),vars)
 end
 
+function var_index(vars::Vector, target_var::Num)
+    return findfirst(x->isequal(x, target_var),vars)
+end
+
 function get_HB_scattering_matrix(model::System,i::Char,j::Char)
     port_i_sym = Symbol('P'*i)
     port_j_sym = Symbol('P'*j)

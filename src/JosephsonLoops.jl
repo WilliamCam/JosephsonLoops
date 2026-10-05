@@ -39,6 +39,9 @@ module JosephsonLoops
 # precompilation time down.
 using ModelingToolkit, Plots, DifferentialEquations, Symbolics, DataStructures, LinearAlgebra, NonlinearSolve
 using SymbolicUtils
+using NonlinearSolve
+using BenchmarkTools
+using StaticArrays
 
 # The files below follow the analysis flow. A netlist of loops is parsed and assembled into a
 # ModelingToolkit model from the component library; that model is integrated in the time

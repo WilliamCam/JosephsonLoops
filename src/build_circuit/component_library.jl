@@ -50,13 +50,32 @@ end
     @parameters begin
         βL = 1.0
     end
-        @variables begin
+    @variables begin
         i(t)
     end
     @equations begin
         out.Φ ~  βL*i
         i ~ in.iₘ - out.iₘ 
         0 ~ in.Φ + out.Φ #Flux flowing from left loop is equal to flux entering the right loop
+    end
+end
+
+@mtkmodel MutualCoupling begin
+    @components begin
+        in = Loop()
+        out = Loop()
+    end
+
+    @parameters begin
+        βM = 1.0
+    end
+
+    @equations begin
+        # Mutual flux contributed to loop 1 by the current in loop 2
+        in.Φ ~ βM * out.iₘ
+
+        # Mutual flux contributed to loop 2 by the current in loop 1
+        out.Φ ~ βM * in.iₘ
     end
 end
 
@@ -112,13 +131,24 @@ end
     @parameters begin
         I = 1.0
         ω = 1.0, [tunable=true]
+    end
+    @equations begin
+        i ~ I*cos(ω*t)
+    end
+end
+
+@mtkmodel CurrentSource_twoTone begin
+    @extend Branch()
+    @parameters begin
+        I = 1.0
+        ω = 1.0, [tunable=true]
         # optional second tone (two pumps through ONE port, like a nodal-port drive);
         # I₂ = 0 keeps every single-tone circuit numerically identical
         I₂ = 0.0
         ω₂ = 1.0, [tunable=true]
     end
     @equations begin
-        i ~ I*sin(ω*t) + I₂*sin(ω₂*t)
+        i ~ I*cos(ω*t) + I₂*cos(ω₂*t)
     end
 end
 

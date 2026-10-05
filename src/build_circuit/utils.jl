@@ -30,7 +30,7 @@ balance cannot represent.
 tsol = tsolve(model, guesses, ps, (0.0, 1e-6) .* ωc; guesses = guesses)
 
 """
-function tsolve(model, u0, param_pairs, tspan; DAE=false, solver_opts = Rodas5(), guesses = nothing, kwargs...)  
+function tsolve(model, u0, param_pairs, tspan; DAE=false, solver_opts = Rodas5(), guesses = nothing, dc_sol = false,kwargs...)  
     if DAE
         prob = DAEProblem(model, merge(Dict(u0), Dict(param_pairs)), tspan; kwargs...)
     else
@@ -40,7 +40,12 @@ function tsolve(model, u0, param_pairs, tspan; DAE=false, solver_opts = Rodas5()
             prob = ODEProblem(model, merge(Dict(u0), Dict(param_pairs)), tspan; kwargs...)
         end
     end
-    sol = @time DifferentialEquations.solve(prob, solver_opts)
+    if dc_sol
+        prob = SteadyStateProblem(prob)
+        sol = DifferentialEquations.solve(prob, DynamicSS())
+    else
+        sol = @time DifferentialEquations.solve(prob, solver_opts)
+    end
     return sol                                                  #Return the solved ODEProblem
 end
 
