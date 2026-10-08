@@ -3,7 +3,7 @@
 JosephsonLoops.jl is an open source package for simulating lumped element superconducting
 circuits containing Josephson junctions. The idea is built upon a mesh analysis formulation
 utilising a common closed loop law for both normal and superconducting loops. Taking inspiration
-from academic works [1] as well as other packages[2], This package was developed during a PhD
+from academic works [1] as well as other packages like [JosepshonCircuits.jl](https://github.com/kpobrien/JosephsonCircuits.jl), This package was developed during a PhD
 project to try and better model strongly coupled SQUID circuits. 
 
 There are many solutions for this sort of thing out there, however this package can
