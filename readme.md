@@ -16,7 +16,7 @@ the way to the solver, and any quantity that can be written as an expression of 
 variables can be read back from a solution.
 
 ## A Disclaimer
-I'm not a software developer / engineer, just a humble physicist. If you endeavour to use 
+I'm not a software developer / engineer, just a physicist. If you endeavour to use 
 and/or contribute to this ongoing work I will respond in due course :)
 
 The rest of this readme was written by LLMs.
