@@ -15,26 +15,24 @@ Every component is an acausal ModelingToolkit model, the circuit equations stay 
 the way to the solver, and any quantity that can be written as an expression of the model's
 variables can be read back from a solution.
 
+## A Disclaimer
+I'm not a software developer / engineer, just a humble physicist. If you endeavour to use 
+and/or contribute to this ongoing work I will respond in due course :)
+
+The rest of this readme was written by LLMs.
+
 ## Main Features
 
 JosephsonLoops.jl excels at solving the classical equations of motion for strongly pumpep
 non-linear systems.
 
-- The working point is solved with the full nonlinearity using collocation harmonic balance, not a Taylor expansion of it, so
-  strongly pumped operating points and their harmonics are captured.
-- The small signal response around a working point is exact in the detuning for the chosen
-  basis, which is what amplifier gain and S parameters need.
-- Two pumps at once are supported, with the collocation grid chosen from the tone ratio.
-- The same model integrates in the time domain, so transients, start up and bistability are
-  available alongside the steady state, and any harmonic balance result can be checked
-  against a time domain solve of the same circuit.
+- Time domain simulations of lumped element superconducting circuits using DifferntialEquations.jl
+- Harmonic balance simulations solved with the full nonlinearity using collocation, the sin($\theta$) term is not Taylor expanded, so
+  strongly pumped operating points and their harmonics are accuratley captured.
+- Small signal analysis using linearisation around a working point.
+- Multi-tone hamronic balance and three wave mixing.
 - External flux and mutual inductance are part of the netlist, because the formulation is
-  written in loop currents.
-
-It is not currently optimised for large junction arrays. The symbolic build grows with the
-size of the circuit, so a travelling wave amplifier with hundreds of cells is out of reach
-of this release. That is a matter of implementation rather than formulation, and it is
-being worked on.
+  written in loop currents, making this formulation a natural choice for flux-coupled squid circuits.
 
 ## Contents
 

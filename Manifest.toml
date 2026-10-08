@@ -1269,7 +1269,7 @@ uuid = "ae98c720-c025-4a4a-838c-29b094483192"
 version = "0.2.1"
 
 [[deps.JosephsonLoops]]
-deps = ["BenchmarkTools", "BifurcationKit", "DataStructures", "DifferentialEquations", "Infiltrator", "LinearAlgebra", "ModelingToolkit", "ModelingToolkitStandardLibrary", "Nemo", "NonlinearSolve", "Optimization", "OptimizationOptimJL", "Plots", "Profile", "QuestBase", "Revise", "StaticArrays", "SymbolicUtils", "Symbolics"]
+deps = ["BenchmarkTools", "BifurcationKit", "DataStructures", "DifferentialEquations", "Infiltrator", "LinearAlgebra", "Lux", "ModelingToolkit", "ModelingToolkitNeuralNets", "ModelingToolkitStandardLibrary", "Nemo", "NonlinearSolve", "Optimization", "OptimizationOptimJL", "OptimizationOptimisers", "Plots", "Profile", "QuestBase", "Revise", "StaticArrays", "SymbolicUtils", "Symbolics"]
 path = "."
 uuid = "fb07e101-5a60-4408-9312-698af44306dd"
 version = "0.1.0"

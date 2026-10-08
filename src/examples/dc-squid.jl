@@ -71,8 +71,3 @@ JosephsonLoops.solve!(lin)
 V_per_Φ0 = 2π * Rj * Ic .* get_solution(lin, squid.R2.r * squid.R2.i, 1)
 @assert all(isfinite, real.(V_per_Φ0)) && all(isfinite, imag.(V_per_Φ0)) "Non-finite flux response"
 
-p_gain = plot(f_gain ./ 1e9, 20 .* log10.(abs.(V_per_Φ0 ./ 1e-6)), lw=2,
-    xlabel="Upper-sideband offset from carrier (GHz)",
-    ylabel="Flux-to-voltage response (dB re 1 μV/Φ₀)",
-    title="DC-SQUID small-signal response, 0–1 GHz offset", label=false)
-display(plot(p_static, p_gain, layout=(2, 1), size=(800, 700)))
