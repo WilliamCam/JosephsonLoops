@@ -155,7 +155,7 @@ end
 @mtkmodel Port begin
     @components begin
         Rₙ = Resistor()
-        source = CurrentSource()
+        source = CurrentSource_twoTone()
         in = Loop()
         out = Loop()
     end
