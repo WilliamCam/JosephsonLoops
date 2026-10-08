@@ -1,23 +1,26 @@
 # JosephsonLoops.jl
 
 JosephsonLoops.jl is an open source package for simulating lumped element superconducting
-circuits containing Josephson junctions. A circuit is written as a list of loops, assembled
-into a symbolic model, and that one model is then solved either in the time domain as an
-initial value problem or in the frequency domain by harmonic balance.
+circuits containing Josephson junctions. The idea is built upon a mesh analysis formulation
+utilising a common closed loop law for both normal and superconducting loops. Taking inspiration
+from academic works [1] as well as other packages[2], This package was developed during a PhD
+project to try and better model strongly coupled SQUID circuits. 
+
+There are many solutions for this sort of thing out there, however this package can
+leverage the full set of tools available to the Julia SciML ecosystem, so it may be of 
+some use to some problems in superconducting circuit design.
 
 The package is built on [ModelingToolkit.jl](https://github.com/SciML/ModelingToolkit.jl).
 Every component is an acausal ModelingToolkit model, the circuit equations stay symbolic all
 the way to the solver, and any quantity that can be written as an expression of the model's
 variables can be read back from a solution.
 
-## What it is for
+## Main Features
 
-JosephsonLoops.jl is aimed at strongly pumped nonlinear circuits with a modest number of
-junctions: parametric amplifiers, flux tunable couplers, SQUIDs, and any driven nonlinear
-oscillator that can be written as a differential equation. Its strengths are the things that
-matter in that regime.
+JosephsonLoops.jl excels at solving the classical equations of motion for strongly pumpep
+non-linear systems.
 
-- The working point is solved with the full nonlinearity, not a Taylor expansion of it, so
+- The working point is solved with the full nonlinearity using collocation harmonic balance, not a Taylor expansion of it, so
   strongly pumped operating points and their harmonics are captured.
 - The small signal response around a working point is exact in the detuning for the chosen
   basis, which is what amplifier gain and S parameters need.
@@ -624,3 +627,6 @@ waves directly for that reason.
 no way to silence it. The second return value, `u0`, is always an empty vector, because the
 line that would populate it is commented out. Pass `guesses` where an initial state is needed,
 which is what the examples do.
+
+## References
+[1] Wang, Y., Zhang, G., Zhang, S., Wang, Y., & Xie, X. (2020). Analysis and Simulation of Multi-Loop SQUID-Based Electric Circuits with Mesh-Current Method. IEEE Transactions on Applied Superconductivity, 30(8), 1–9. https://doi.org/10.1109/TASC.2020.3024008
