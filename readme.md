@@ -15,12 +15,6 @@ Every component is an acausal ModelingToolkit model, the circuit equations stay 
 the way to the solver, and any quantity that can be written as an expression of the model's
 variables can be read back from a solution.
 
-## A Disclaimer
-I'm not a software developer / engineer, just a physicist. If you endeavour to use 
-and/or contribute to this ongoing work I will respond in due course :)
-
-The rest of this readme was written by LLMs.
-
 ## Main Features
 
 JosephsonLoops.jl excels at solving the classical equations of motion for strongly pumpep
